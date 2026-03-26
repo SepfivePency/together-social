@@ -3,7 +3,8 @@ export enum ViewState {
   GROUP = 'GROUP',
   PROFILE = 'PROFILE',
   DISCOVERY = 'DISCOVERY',
-  CHAT = 'CHAT'
+  CHAT = 'CHAT',
+  GROUPS_MOBILE = 'GROUPS_MOBILE'
 }
 
 export interface User {
@@ -12,6 +13,8 @@ export interface User {
   handle: string;
   avatar: string;
   bio: string;
+  school?: string;
+  company?: string;
 }
 
 export interface Post {

@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { Search, Users, Tag, PlusCircle, Globe } from 'lucide-react';
-import { Group } from '../types';
+import React, { useState, useEffect } from 'react';
+import { Search, Users, Tag, PlusCircle, Globe, X, Building2, GraduationCap } from 'lucide-react';
+import { Group, Channel } from '../types';
 
 // Mock data for discovery
 const DISCOVERY_GROUPS = [
@@ -60,9 +60,52 @@ const DISCOVERY_GROUPS = [
   }
 ];
 
-export const Discovery: React.FC = () => {
+export const Discovery: React.FC<{ showToast?: (msg: string) => void, onJoinGroup?: (group: Group) => void }> = ({ showToast, onJoinGroup }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState('All');
+  const [verificationState, setVerificationState] = useState<'select' | 'school' | 'enterprise' | null>('select');
+  const [joinedGroups, setJoinedGroups] = useState<Set<string>>(new Set());
+  const [requestedGroups, setRequestedGroups] = useState<Set<string>>(new Set());
+
+  const handleJoin = (groupId: string, isPrivate: boolean) => {
+    if (isPrivate) {
+      setRequestedGroups(prev => {
+        const newSet = new Set(prev);
+        newSet.add(groupId);
+        return newSet;
+      });
+      showToast?.('Join request sent!');
+    } else {
+      setJoinedGroups(prev => {
+        const newSet = new Set(prev);
+        newSet.add(groupId);
+        return newSet;
+      });
+      
+      const discoveryGroup = DISCOVERY_GROUPS.find(g => g.id === groupId);
+      if (discoveryGroup && onJoinGroup) {
+        const newGroup: Group = {
+          id: discoveryGroup.id,
+          name: discoveryGroup.name,
+          icon: discoveryGroup.image,
+          description: discoveryGroup.description,
+          members: discoveryGroup.members + 1,
+          channels: [
+            { id: `c1-${discoveryGroup.id}`, name: 'general', type: 'text' },
+            { id: `c2-${discoveryGroup.id}`, name: 'announcements', type: 'text' },
+            { id: `c3-${discoveryGroup.id}`, name: 'voice-lounge', type: 'voice' }
+          ]
+        };
+        onJoinGroup(newGroup);
+      }
+      showToast?.('Successfully joined group!');
+    }
+  };
+
+  const handleVerificationSubmit = () => {
+    setVerificationState(null);
+    showToast?.('Verification submitted successfully!');
+  };
 
   const filteredGroups = DISCOVERY_GROUPS.filter(group => {
     const matchesSearch = group.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -74,7 +117,115 @@ export const Discovery: React.FC = () => {
   const categories = ['All', 'Tech', 'Arts', 'Sports', 'Gaming', 'Academic', 'Social'];
 
   return (
-    <div className="flex-1 bg-slate-950 overflow-y-auto h-full p-4 md:p-8 pb-20 md:pb-8">
+    <div className="flex-1 bg-slate-950 overflow-y-auto h-full p-4 md:p-8 pb-20 md:pb-8 relative">
+      {/* Identity Verification Modal */}
+      {verificationState && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl relative animate-in fade-in zoom-in duration-300">
+            <button 
+              onClick={() => setVerificationState(null)}
+              className="absolute top-4 right-4 text-slate-500 hover:text-white transition-colors"
+            >
+              <X size={20} />
+            </button>
+            
+            <div className="text-center mb-8 mt-2">
+              <h2 className="text-2xl font-bold text-white mb-2">Verify Your Identity</h2>
+              <p className="text-slate-400 text-sm">
+                Connect with your real community by verifying your school or enterprise email.
+              </p>
+            </div>
+
+            {verificationState === 'select' && (
+              <div className="space-y-4">
+                <button 
+                  onClick={() => setVerificationState('school')}
+                  className="w-full flex items-center gap-4 p-4 rounded-xl border border-slate-700 hover:border-indigo-500 hover:bg-indigo-500/10 transition-all group"
+                >
+                  <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center group-hover:bg-indigo-500/20 group-hover:text-indigo-400 text-slate-400 transition-colors">
+                    <GraduationCap size={24} />
+                  </div>
+                  <div className="text-left flex-1">
+                    <div className="font-semibold text-white">School Verification</div>
+                    <div className="text-xs text-slate-400">Use your .edu email address</div>
+                  </div>
+                </button>
+
+                <button 
+                  onClick={() => setVerificationState('enterprise')}
+                  className="w-full flex items-center gap-4 p-4 rounded-xl border border-slate-700 hover:border-cyan-500 hover:bg-cyan-500/10 transition-all group"
+                >
+                  <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center group-hover:bg-cyan-500/20 group-hover:text-cyan-400 text-slate-400 transition-colors">
+                    <Building2 size={24} />
+                  </div>
+                  <div className="text-left flex-1">
+                    <div className="font-semibold text-white">Enterprise Verification</div>
+                    <div className="text-xs text-slate-400">Use your company email address</div>
+                  </div>
+                </button>
+              </div>
+            )}
+
+            {verificationState === 'school' && (
+              <div className="space-y-4 text-left animate-in slide-in-from-right-4 duration-300">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">School Name</label>
+                  <input type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500" placeholder="e.g. Stanford University" />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Student ID</label>
+                  <input type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500" placeholder="Your Student ID" />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Full Name</label>
+                  <input type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500" placeholder="Your Name" />
+                </div>
+                <button onClick={handleVerificationSubmit} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 rounded-lg transition-colors mt-4">
+                  Submit Verification
+                </button>
+                <button onClick={() => setVerificationState('select')} className="w-full text-slate-400 hover:text-white text-sm mt-2">
+                  Back
+                </button>
+              </div>
+            )}
+
+            {verificationState === 'enterprise' && (
+              <div className="space-y-4 text-left animate-in slide-in-from-right-4 duration-300">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Company Name</label>
+                  <input type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500" placeholder="e.g. Google" />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Employee ID</label>
+                  <input type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500" placeholder="Your Employee ID" />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Full Name</label>
+                  <input type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500" placeholder="Your Name" />
+                </div>
+                <button onClick={handleVerificationSubmit} className="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-medium py-2 rounded-lg transition-colors mt-4">
+                  Submit Verification
+                </button>
+                <button onClick={() => setVerificationState('select')} className="w-full text-slate-400 hover:text-white text-sm mt-2">
+                  Back
+                </button>
+              </div>
+            )}
+
+            {verificationState === 'select' && (
+              <div className="mt-6 text-center">
+                <button 
+                  onClick={() => setVerificationState(null)}
+                  className="text-sm text-slate-500 hover:text-slate-300 transition-colors"
+                >
+                  Skip for now
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="max-w-6xl mx-auto space-y-8">
         
         {/* Header */}
@@ -153,13 +304,18 @@ export const Discovery: React.FC = () => {
                     <span>{group.members}</span>
                   </div>
                   
-                  <button className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-2
+                  <button 
+                    onClick={() => handleJoin(group.id, group.isPrivate)}
+                    disabled={joinedGroups.has(group.id) || requestedGroups.has(group.id)}
+                    className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed
                     ${group.isPrivate 
                       ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' 
                       : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
                   >
-                    {group.isPrivate ? 'Request' : 'Join'}
-                    {!group.isPrivate && <PlusCircle size={14} />}
+                    {group.isPrivate 
+                      ? (requestedGroups.has(group.id) ? 'Requested' : 'Request') 
+                      : (joinedGroups.has(group.id) ? 'Joined' : 'Join')}
+                    {!group.isPrivate && !joinedGroups.has(group.id) && <PlusCircle size={14} />}
                   </button>
                 </div>
               </div>

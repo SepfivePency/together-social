@@ -6,15 +6,29 @@ import { generatePostEnhancement } from '../services/geminiService';
 interface FeedProps {
   currentUser: User;
   posts: Post[];
+  showToast?: (msg: string) => void;
 }
 
-export const Feed: React.FC<FeedProps> = ({ currentUser, posts }) => {
+export const Feed: React.FC<FeedProps> = ({ currentUser, posts, showToast }) => {
   const [newPostContent, setNewPostContent] = useState('');
   const [isEnhancing, setIsEnhancing] = useState(false);
   // Simple state to show "posted" items for demo (in real app, this would be lifted up)
   const [localPosts, setLocalPosts] = useState<Post[]>([]);
+  const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
 
   const allPosts = [...localPosts, ...posts]; // local posts are newer, so put them first for reverse chrono
+
+  const handleLike = (postId: string) => {
+    setLikedPosts(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(postId)) {
+        newSet.delete(postId);
+      } else {
+        newSet.add(postId);
+      }
+      return newSet;
+    });
+  };
 
   const handleEnhance = async () => {
     if (!newPostContent.trim()) return;
@@ -59,11 +73,11 @@ export const Feed: React.FC<FeedProps> = ({ currentUser, posts }) => {
               />
               <div className="flex items-center justify-between mt-3">
                 <div className="flex gap-2">
-                  <button className="flex items-center gap-1 text-slate-400 hover:text-indigo-400 px-3 py-1.5 rounded-lg hover:bg-slate-800 transition-colors text-sm">
+                  <button className="flex items-center gap-1 text-slate-400 hover:text-indigo-400 px-3 py-1.5 rounded-lg hover:bg-slate-800 transition-colors text-sm" onClick={() => showToast?.('Photo upload coming soon!')}>
                     <ImageIcon size={18} />
                     <span className="hidden sm:inline">Photo</span>
                   </button>
-                  <button className="flex items-center gap-1 text-slate-400 hover:text-indigo-400 px-3 py-1.5 rounded-lg hover:bg-slate-800 transition-colors text-sm">
+                  <button className="flex items-center gap-1 text-slate-400 hover:text-indigo-400 px-3 py-1.5 rounded-lg hover:bg-slate-800 transition-colors text-sm" onClick={() => showToast?.('Link attachment coming soon!')}>
                     <LinkIcon size={18} />
                     <span className="hidden sm:inline">Link</span>
                   </button>
@@ -108,15 +122,24 @@ export const Feed: React.FC<FeedProps> = ({ currentUser, posts }) => {
                 )}
                 
                 <div className="flex items-center gap-6 pt-3 border-t border-slate-800">
-                  <button className="flex items-center gap-2 text-slate-400 hover:text-pink-500 transition-colors">
-                    <Heart size={20} />
-                    <span className="text-sm">{post.likes}</span>
+                  <button 
+                    onClick={() => handleLike(post.id)}
+                    className={`flex items-center gap-2 transition-colors ${likedPosts.has(post.id) ? 'text-pink-500' : 'text-slate-400 hover:text-pink-500'}`}
+                  >
+                    <Heart size={20} className={likedPosts.has(post.id) ? 'fill-current' : ''} />
+                    <span className="text-sm">{post.likes + (likedPosts.has(post.id) ? 1 : 0)}</span>
                   </button>
-                  <button className="flex items-center gap-2 text-slate-400 hover:text-blue-500 transition-colors">
+                  <button 
+                    onClick={() => showToast?.('Comments feature coming soon!')}
+                    className="flex items-center gap-2 text-slate-400 hover:text-blue-500 transition-colors"
+                  >
                     <MessageCircle size={20} />
                     <span className="text-sm">{post.comments}</span>
                   </button>
-                   <button className="flex items-center gap-2 text-slate-400 hover:text-green-500 transition-colors">
+                   <button 
+                    onClick={() => showToast?.('Link copied to clipboard!')}
+                    className="flex items-center gap-2 text-slate-400 hover:text-green-500 transition-colors"
+                  >
                     <Share2 size={20} />
                     <span className="text-sm">Share</span>
                   </button>

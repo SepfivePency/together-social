@@ -6,6 +6,8 @@ export const CURRENT_USER: User = {
   handle: '@alexc',
   avatar: 'https://picsum.photos/id/64/200/200',
   bio: 'CS Student 🎓 | Photographer 📸 | Coffee Lover ☕',
+  school: 'Stanford University',
+  company: 'Google',
 };
 
 export const MOCK_GROUPS: Group[] = [

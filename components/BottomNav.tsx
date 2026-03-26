@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home, Compass, MessageCircle, User } from 'lucide-react';
+import { Home, Compass, MessageCircle, User, Users } from 'lucide-react';
 import { ViewState } from '../types';
 
 interface BottomNavProps {
@@ -24,6 +24,14 @@ export const BottomNav: React.FC<BottomNavProps> = ({ currentView, onSelectView 
       >
         <Compass size={24} />
         <span className="text-[10px] font-medium">Discover</span>
+      </button>
+
+      <button
+        onClick={() => onSelectView(ViewState.GROUPS_MOBILE)}
+        className={`flex flex-col items-center gap-1 ${currentView === ViewState.GROUPS_MOBILE || currentView === ViewState.GROUP ? 'text-blue-400' : 'text-slate-500'}`}
+      >
+        <Users size={24} />
+        <span className="text-[10px] font-medium">Groups</span>
       </button>
 
       <button

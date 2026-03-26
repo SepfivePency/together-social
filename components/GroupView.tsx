@@ -1,19 +1,38 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Hash, Volume2, Users, Search, Bell, Settings, Send, Bot } from 'lucide-react';
+import { Hash, Volume2, Users, Search, Bell, Settings, Send, Bot, LogOut, BellOff, Link as LinkIcon, Menu, X } from 'lucide-react';
 import { Group, Channel, Message, User } from '../types';
 import { generateGroupAssistantResponse } from '../services/geminiService';
 
 interface GroupViewProps {
   group: Group;
   currentUser: User;
+  showToast?: (msg: string) => void;
+  onLeaveGroup?: (groupId: string) => void;
 }
 
-export const GroupView: React.FC<GroupViewProps> = ({ group, currentUser }) => {
+export const GroupView: React.FC<GroupViewProps> = ({ group, currentUser, showToast, onLeaveGroup }) => {
   const [activeChannel, setActiveChannel] = useState<Channel>(group.channels[0]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isAiProcessing, setIsAiProcessing] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [showMobileChannels, setShowMobileChannels] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearchOptions, setShowSearchOptions] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const CHANNEL_COLORS = ['bg-red-500', 'bg-blue-500', 'bg-green-500', 'bg-yellow-500', 'bg-purple-500', 'bg-pink-500', 'bg-indigo-500', 'bg-teal-500'];
+  const USER_COLORS = ['bg-slate-700', 'bg-zinc-700', 'bg-stone-700', 'bg-neutral-700', 'bg-gray-700'];
+
+  const getMessageColor = (msg: Message) => {
+    if (msg.senderId === currentUser.id) return 'bg-[#000080]'; // Navy blue
+    if (msg.senderId === 'ai_bot') return 'bg-indigo-900/50 border border-indigo-500/30';
+    
+    const uniqueSenders = Array.from(new Set(messages.filter(m => m.senderId !== currentUser.id && m.senderId !== 'ai_bot').map(m => m.senderId)));
+    const senderIdx = uniqueSenders.indexOf(msg.senderId);
+    return USER_COLORS[Math.max(0, senderIdx) % USER_COLORS.length];
+  };
 
   // Initialize messages when channel changes
   useEffect(() => {
@@ -84,33 +103,48 @@ export const GroupView: React.FC<GroupViewProps> = ({ group, currentUser }) => {
     }
   }
 
+  const filteredMessages = messages.filter(msg => 
+    msg.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    msg.senderName.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   return (
-    <div className="flex flex-1 h-full overflow-hidden bg-slate-800">
+    <div className="flex flex-1 h-full overflow-hidden bg-slate-800 relative">
+      {/* Mobile Channels Overlay */}
+      {showMobileChannels && (
+        <div 
+          className="md:hidden absolute inset-0 bg-black/50 z-40"
+          onClick={() => setShowMobileChannels(false)}
+        />
+      )}
+
       {/* Channels Sidebar */}
-      <div className="w-60 bg-slate-900 flex flex-col shrink-0 border-r border-slate-950">
-        <div className="h-12 flex items-center px-4 shadow-sm border-b border-slate-950 font-bold text-slate-100 truncate">
-          {group.name}
+      <div className={`${showMobileChannels ? 'flex' : 'hidden'} md:flex absolute md:relative z-50 h-full w-64 bg-slate-900 flex-col shrink-0 border-r border-slate-950 transition-transform`}>
+        <div className="h-12 flex items-center justify-between px-4 shadow-sm border-b border-slate-950 font-bold text-slate-100">
+          <span className="truncate">{group.name}</span>
+          <button className="md:hidden text-slate-400 hover:text-white" onClick={() => setShowMobileChannels(false)}>
+            <X size={20} />
+          </button>
         </div>
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
-          {group.channels.map(channel => (
-            <button
-              key={channel.id}
-              onClick={() => setActiveChannel(channel)}
-              className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-colors group
-              ${activeChannel.id === channel.id ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
-            >
-              {channel.type === 'text' ? <Hash size={18} className="text-slate-500" /> : <Volume2 size={18} className="text-slate-500" />}
-              <span className="truncate">{channel.name}</span>
-            </button>
-          ))}
-        </div>
-        <div className="p-3 bg-slate-950/50 flex items-center gap-2 border-t border-slate-950">
-            <img src={currentUser.avatar} className="w-8 h-8 rounded-full" alt="Me" />
-            <div className="flex-1 overflow-hidden">
-                <div className="text-xs font-bold text-white truncate">{currentUser.name}</div>
-                <div className="text-[10px] text-slate-400 truncate">{currentUser.handle}</div>
-            </div>
-            <Settings size={16} className="text-slate-400 hover:text-white cursor-pointer" />
+          {group.channels.map((channel, idx) => {
+            const colorClass = CHANNEL_COLORS[idx % CHANNEL_COLORS.length];
+            return (
+              <button
+                key={channel.id}
+                onClick={() => {
+                  setActiveChannel(channel);
+                  setShowMobileChannels(false);
+                }}
+                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded transition-colors group
+                ${activeChannel.id === channel.id ? 'bg-slate-700 text-slate-100' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
+              >
+                <div className={`w-2 h-2 rounded-full ${colorClass}`} />
+                {channel.type === 'text' ? <Hash size={16} className="text-slate-500" /> : <Volume2 size={16} className="text-slate-500" />}
+                <span className="truncate">{channel.name}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -119,29 +153,116 @@ export const GroupView: React.FC<GroupViewProps> = ({ group, currentUser }) => {
         {/* Top Header */}
         <div className="h-12 border-b border-slate-900/50 flex items-center justify-between px-4 shrink-0 bg-slate-800">
           <div className="flex items-center gap-2 text-slate-100 font-bold">
-            <Hash size={20} className="text-slate-400" />
-            {activeChannel.name}
+            <button 
+              className="md:hidden text-slate-400 hover:text-white mr-2"
+              onClick={() => setShowMobileChannels(true)}
+            >
+              <Menu size={20} />
+            </button>
+            <Hash size={20} className="text-slate-400 hidden sm:block" />
+            <span className="truncate max-w-[150px] sm:max-w-xs">{activeChannel.name}</span>
           </div>
-          <div className="flex items-center gap-4 text-slate-400">
-            <Bell size={20} className="hover:text-slate-200 cursor-pointer" />
-            <Users size={20} className="hover:text-slate-200 cursor-pointer" />
-            <div className="relative">
+          <div className="flex items-center gap-4 text-slate-400 relative">
+            <div className="relative hidden sm:block" onMouseLeave={() => setShowSearchOptions(false)}>
                 <input 
                     type="text" 
-                    placeholder="Search" 
-                    className="bg-slate-900 text-sm rounded px-2 py-1 w-36 focus:w-48 transition-all text-slate-200 focus:outline-none" 
+                    placeholder="Search messages..." 
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onFocus={() => setShowSearchOptions(true)}
+                    className="bg-slate-900 text-sm rounded px-2 py-1 w-36 focus:w-48 transition-all text-slate-200 focus:outline-none placeholder:text-slate-500" 
                 />
                 <Search size={14} className="absolute right-2 top-2 text-slate-500" />
+                
+                {/* Search Options Dropdown */}
+                {showSearchOptions && (
+                  <div className="absolute top-8 right-0 w-48 bg-slate-900 border border-slate-700 rounded-lg shadow-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                    <div className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-800">
+                        Search Options
+                    </div>
+                    <button 
+                      onClick={() => { showToast?.('Search by date coming soon!'); setShowSearchOptions(false); }} 
+                      className="w-full text-left px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
+                    >
+                        By Date (按日期)
+                    </button>
+                    <button 
+                      onClick={() => { showToast?.('Search by type coming soon!'); setShowSearchOptions(false); }} 
+                      className="w-full text-left px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
+                    >
+                        By Type (按类型)
+                    </button>
+                  </div>
+                )}
             </div>
+            <button 
+              onClick={() => setShowSettings(!showSettings)}
+              className="hover:text-slate-200 transition-colors p-1 rounded-md hover:bg-slate-700"
+            >
+              <Settings size={20} />
+            </button>
+
+            {/* Settings Dropdown */}
+            {showSettings && (
+              <div className="absolute top-10 right-0 w-56 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="p-3 border-b border-slate-800">
+                  <h3 className="font-bold text-white truncate">{group.name}</h3>
+                  <p className="text-xs text-slate-400">Community Settings</p>
+                </div>
+                <div className="p-1">
+                  <button 
+                    onClick={() => {
+                      setIsMuted(!isMuted);
+                      showToast?.(isMuted ? 'Notifications enabled' : 'Notifications muted');
+                      setShowSettings(false);
+                    }}
+                    className="w-full flex items-center gap-3 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-white rounded-lg transition-colors"
+                  >
+                    {isMuted ? <Bell size={16} /> : <BellOff size={16} />}
+                    {isMuted ? 'Unmute Notifications' : 'Mute Notifications'}
+                  </button>
+                  <button 
+                    onClick={() => {
+                      showToast?.('Invite link copied to clipboard!');
+                      setShowSettings(false);
+                    }}
+                    className="w-full flex items-center gap-3 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 hover:text-white rounded-lg transition-colors"
+                  >
+                    <LinkIcon size={16} />
+                    Copy Invite Link
+                  </button>
+                  <div className="h-px bg-slate-800 my-1 mx-2" />
+                  <button 
+                    onClick={() => {
+                      setShowSettings(false);
+                      onLeaveGroup?.(group.id);
+                      showToast?.(`You left ${group.name}`);
+                    }}
+                    className="w-full flex items-center gap-3 px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300 rounded-lg transition-colors"
+                  >
+                    <LogOut size={16} />
+                    Exit Community
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4" ref={scrollRef}>
-          {messages.map((msg, idx) => {
-            const isSequential = idx > 0 && messages[idx - 1].senderId === msg.senderId;
+          {filteredMessages.length === 0 && searchQuery && (
+            <div className="text-center text-slate-500 mt-10">
+              No messages found for "{searchQuery}"
+            </div>
+          )}
+          {filteredMessages.map((msg, idx) => {
+            const isMe = msg.senderId === currentUser.id;
+            const isSequential = idx > 0 && filteredMessages[idx - 1].senderId === msg.senderId;
+            const msgBgColor = getMessageColor(msg);
+
             return (
-              <div key={msg.id} className={`flex gap-4 group ${isSequential ? 'mt-0.5' : 'mt-4'}`}>
+              <div key={msg.id} className={`flex gap-4 group ${isSequential ? 'mt-0.5' : 'mt-4'} ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
                 {!isSequential ? (
                   <img 
                     src={msg.senderAvatar} 
@@ -151,9 +272,9 @@ export const GroupView: React.FC<GroupViewProps> = ({ group, currentUser }) => {
                 ) : (
                   <div className="w-10" /> 
                 )}
-                <div className="flex-1 min-w-0">
+                <div className={`flex flex-col min-w-0 max-w-[75%] ${isMe ? 'items-end' : 'items-start'}`}>
                   {!isSequential && (
-                    <div className="flex items-center gap-2">
+                    <div className={`flex items-center gap-2 mb-1 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
                       <span className={`font-medium cursor-pointer hover:underline ${msg.isAi ? 'text-indigo-400' : 'text-slate-100'}`}>
                         {msg.senderName}
                         {msg.isAi && <span className="ml-1 text-[10px] bg-indigo-500 text-white px-1 rounded uppercase">Bot</span>}
@@ -161,7 +282,9 @@ export const GroupView: React.FC<GroupViewProps> = ({ group, currentUser }) => {
                       <span className="text-xs text-slate-400">{msg.timestamp}</span>
                     </div>
                   )}
-                  <p className={`text-slate-300 whitespace-pre-wrap break-words ${isSequential ? '' : 'mt-1'}`}>{msg.content}</p>
+                  <div className={`px-4 py-2 rounded-2xl ${msgBgColor} ${isMe ? 'rounded-tr-none text-white' : 'rounded-tl-none text-slate-200'}`}>
+                    <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                  </div>
                 </div>
               </div>
             );
@@ -187,7 +310,10 @@ export const GroupView: React.FC<GroupViewProps> = ({ group, currentUser }) => {
                 </div>
             )}
             <div className="flex items-end gap-3">
-              <button className="text-slate-400 hover:text-slate-200 p-1">
+              <button 
+                onClick={() => showToast?.('Attachment feature coming soon!')}
+                className="text-slate-400 hover:text-slate-200 p-1"
+              >
                  <div className="w-6 h-6 rounded-full bg-slate-600 flex items-center justify-center">
                     <span className="text-lg leading-none pb-1">+</span>
                  </div>
@@ -214,50 +340,6 @@ export const GroupView: React.FC<GroupViewProps> = ({ group, currentUser }) => {
               Together App • Type <strong>@ai</strong> to invite the Assistant
           </div>
         </div>
-      </div>
-      
-      {/* Right Sidebar (Members) - Hidden on smaller screens */}
-      <div className="hidden lg:block w-60 bg-slate-900 border-l border-slate-950 p-4 overflow-y-auto">
-        <h3 className="text-xs font-bold text-slate-500 uppercase mb-4">Online — 3</h3>
-        <div className="space-y-2">
-           <div className="flex items-center gap-3 opacity-100 hover:bg-slate-800 p-2 rounded cursor-pointer">
-             <div className="relative">
-                <img src={currentUser.avatar} className="w-8 h-8 rounded-full" alt="" />
-                <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-slate-900"></div>
-             </div>
-             <div>
-                <div className="text-sm font-medium text-slate-200">{currentUser.name}</div>
-             </div>
-           </div>
-           <div className="flex items-center gap-3 opacity-100 hover:bg-slate-800 p-2 rounded cursor-pointer">
-             <div className="relative">
-                <img src="https://picsum.photos/id/65/200/200" className="w-8 h-8 rounded-full" alt="" />
-                <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-slate-900"></div>
-             </div>
-             <div>
-                <div className="text-sm font-medium text-slate-200">Sarah Jenkins</div>
-             </div>
-           </div>
-           <div className="flex items-center gap-3 opacity-100 hover:bg-slate-800 p-2 rounded cursor-pointer">
-             <div className="relative">
-                <img src="https://api.dicebear.com/7.x/bottts/svg?seed=together" className="w-8 h-8 rounded-full bg-indigo-500" alt="" />
-                <div className="absolute bottom-0 right-0 w-3 h-3 bg-indigo-500 rounded-full border-2 border-slate-900"></div>
-             </div>
-             <div>
-                <div className="text-sm font-medium text-indigo-400">Together Bot</div>
-                <div className="text-[10px] text-slate-500 uppercase font-bold">Bot</div>
-             </div>
-           </div>
-        </div>
-        
-         <h3 className="text-xs font-bold text-slate-500 uppercase mt-6 mb-4">Offline — 14</h3>
-         {/* Mock offline members */}
-         {[1,2,3,4].map(i => (
-            <div key={i} className="flex items-center gap-3 opacity-50 hover:opacity-100 hover:bg-slate-800 p-2 rounded cursor-pointer">
-                <img src={`https://picsum.photos/seed/${i + 100}/200/200`} className="w-8 h-8 rounded-full grayscale" alt="" />
-                <div className="text-sm font-medium text-slate-400">Student {i}</div>
-            </div>
-         ))}
       </div>
     </div>
   );

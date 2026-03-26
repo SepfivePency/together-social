@@ -8,6 +8,7 @@ interface SidebarProps {
   onSelectGroup: (group: Group) => void;
   onSelectView: (view: ViewState) => void;
   currentView: ViewState;
+  showToast?: (msg: string) => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -16,9 +17,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectGroup,
   onSelectView,
   currentView,
+  showToast,
 }) => {
+
   return (
-    <div className="hidden md:flex w-[72px] bg-slate-900 flex-col items-center py-4 gap-4 border-r border-slate-800 h-screen overflow-y-auto shrink-0 z-50">
+    <div className="hidden md:flex w-[72px] bg-slate-900/80 backdrop-blur-md flex-col items-center py-4 gap-4 border-r border-slate-800 h-screen overflow-y-auto shrink-0 z-50">
       {/* Home Feed */}
       <button
         onClick={() => onSelectView(ViewState.HOME)}
@@ -81,7 +84,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
       ))}
 
       {/* Add Group */}
-      <button className="w-12 h-12 rounded-full bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white flex items-center justify-center transition-all duration-200 group relative">
+      <button 
+        onClick={() => showToast?.('Create Group feature coming soon!')}
+        className="w-12 h-12 rounded-full bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white flex items-center justify-center transition-all duration-200 group relative"
+      >
         <Plus size={24} />
         <span className="absolute left-16 bg-black text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none transition-opacity z-50">
           Create Group

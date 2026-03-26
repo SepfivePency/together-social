@@ -1,20 +1,65 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { User, Post } from '../types';
-import { MapPin, Calendar, Link as LinkIcon, Edit3 } from 'lucide-react';
+import { MapPin, Calendar, Link as LinkIcon, Edit3, Settings, User as UserIcon, Palette } from 'lucide-react';
 
 interface ProfileProps {
   user: User;
   posts: Post[];
+  showToast?: (msg: string) => void;
+  appBgColor?: string;
+  setAppBgColor?: (color: string) => void;
 }
 
-export const Profile: React.FC<ProfileProps> = ({ user, posts }) => {
+export const Profile: React.FC<ProfileProps> = ({ user, posts, showToast, appBgColor, setAppBgColor }) => {
+  const [showSettings, setShowSettings] = useState(false);
+  const colors = ['#0f172a', '#171717', '#1e1b4b', '#052e16', '#4a044e', '#2e1065', '#3f3f46', '#111827'];
+
   return (
-    <div className="flex-1 bg-slate-950 overflow-y-auto h-full">
+    <div className="flex-1 bg-slate-950 overflow-y-auto h-full relative">
+      {/* Settings Dropdown */}
+      <div className="absolute top-4 right-4 z-10">
+         <button 
+           onClick={() => setShowSettings(!showSettings)} 
+           className="bg-black/50 hover:bg-black/70 text-white p-2 rounded-full backdrop-blur-sm transition-colors"
+         >
+           <Settings size={20} />
+         </button>
+         {showSettings && (
+           <div className="absolute top-12 right-0 w-56 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+             <button 
+               onClick={() => { showToast?.('Cover image upload coming soon!'); setShowSettings(false); }} 
+               className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
+             >
+               <Edit3 size={16} /> Edit Cover
+             </button>
+             <button 
+               onClick={() => { showToast?.('Profile editing coming soon!'); setShowSettings(false); }} 
+               className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
+             >
+               <UserIcon size={16} /> Edit Profile
+             </button>
+             <div className="h-px bg-slate-800 my-1" />
+             <div className="px-4 py-3">
+               <div className="flex items-center gap-2 text-sm text-slate-400 mb-3">
+                 <Palette size={14} /> Theme Color
+               </div>
+               <div className="flex flex-wrap gap-2">
+                 {colors.map(c => (
+                   <button
+                     key={c}
+                     onClick={() => { setAppBgColor?.(c); setShowSettings(false); }}
+                     className={`w-6 h-6 rounded-full border hover:scale-110 transition-transform ${appBgColor === c ? 'border-white' : 'border-slate-600'}`}
+                     style={{ backgroundColor: c }}
+                   />
+                 ))}
+               </div>
+             </div>
+           </div>
+         )}
+      </div>
+
       {/* Banner */}
       <div className="h-48 md:h-64 bg-gradient-to-r from-indigo-900 via-purple-900 to-slate-900 relative">
-        <button className="absolute bottom-4 right-4 bg-black/50 hover:bg-black/70 text-white px-3 py-1.5 rounded-lg text-sm backdrop-blur-sm transition-colors flex items-center gap-2">
-            <Edit3 size={14} /> Edit Cover
-        </button>
       </div>
 
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 pb-12">
@@ -34,10 +79,10 @@ export const Profile: React.FC<ProfileProps> = ({ user, posts }) => {
           </div>
 
           <div className="mb-4 flex gap-3">
-             <button className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg font-medium transition-colors">
-                Edit Profile
-             </button>
-             <button className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg font-medium transition-colors border border-slate-700">
+             <button 
+                onClick={() => showToast?.('Friends list coming soon!')}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg font-medium transition-colors border border-slate-700"
+             >
                 Friends
              </button>
           </div>
