@@ -31,7 +31,7 @@ function App() {
       setAuthLoading(false);
       if (session) {
         fetchGroups(session.user.id);
-        fetchFeed();
+        fetchFeed(session.user.id);
       }
     });
 
@@ -41,17 +41,14 @@ function App() {
       setSession(session);
       if (session) {
         fetchGroups(session.user.id);
-        fetchFeed();
+        fetchFeed(session.user.id);
       }
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  const fetchFeed = async () => {
-    if (!session) return;
-    const userId = session.user.id;
-
+  const fetchFeed = async (userId: string) => {
     // 1. Get users who share at least one group with me
     const { data: myMemberships } = await supabase.from('group_members').select('group_id').eq('user_id', userId);
     const myGroupIds = (myMemberships || []).map(m => m.group_id);
