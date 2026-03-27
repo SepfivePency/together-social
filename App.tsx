@@ -1,4 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { Session } from '@supabase/supabase-js';
+import { supabase } from './lib/supabase';
+import { Auth } from './components/Auth';
 import { Sidebar } from './components/Sidebar';
 import { Feed } from './components/Feed';
 import { GroupView } from './components/GroupView';
@@ -7,15 +10,97 @@ import { Discovery } from './components/Discovery';
 import { DirectMessages } from './components/DirectMessages';
 import { BottomNav } from './components/BottomNav';
 import { GroupsMobile } from './components/GroupsMobile';
-import { CURRENT_USER, MOCK_GROUPS, MOCK_POSTS } from './constants';
-import { Group, ViewState } from './types';
+import { Notifications } from './components/Notifications';
+import { MOCK_GROUPS, MOCK_POSTS } from './constants';
+import { Group, ViewState, User, Post } from './types';
 
 function App() {
+  const [session, setSession] = useState<Session | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [currentView, setCurrentView] = useState<ViewState>(ViewState.CHAT);
   const [activeGroup, setActiveGroup] = useState<Group | null>(null);
-  const [appBgColor, setAppBgColor] = useState<string>('#0f172a'); // Default slate-950
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [myGroups, setMyGroups] = useState<Group[]>(MOCK_GROUPS);
+  const [feedPosts, setFeedPosts] = useState<Post[]>([]);
+  const [viewingUser, setViewingUser] = useState<User | null>(null);
+  const [focusedPostId, setFocusedPostId] = useState<string | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setAuthLoading(false);
+      if (session) {
+        fetchGroups(session.user.id);
+        fetchFeed();
+      }
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (session) {
+        fetchGroups(session.user.id);
+        fetchFeed();
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const fetchFeed = async () => {
+    if (!session) return;
+    const userId = session.user.id;
+
+    // 1. Get users who share at least one group with me
+    const { data: myMemberships } = await supabase.from('group_members').select('group_id').eq('user_id', userId);
+    const myGroupIds = (myMemberships || []).map(m => m.group_id);
+    
+    let visibleUserIds = new Set<string>([userId]); // Always see own posts
+    
+    if (myGroupIds.length > 0) {
+      const { data: groupPeers } = await supabase.from('group_members').select('user_id').in('group_id', myGroupIds);
+      (groupPeers || []).forEach(p => visibleUserIds.add(p.user_id));
+    }
+
+    // 2. Get accepted friends
+    const { data: friends1 } = await supabase.from('friendships').select('friend_id').eq('user_id', userId).eq('status', 'accepted');
+    const { data: friends2 } = await supabase.from('friendships').select('user_id').eq('friend_id', userId).eq('status', 'accepted');
+    (friends1 || []).forEach(f => visibleUserIds.add(f.friend_id));
+    (friends2 || []).forEach(f => visibleUserIds.add(f.user_id));
+
+    const ids = Array.from(visibleUserIds);
+    
+    // 3. Fetch posts only from visible users
+    const { data, error } = await supabase
+      .from('posts').select(`*, profiles!posts_author_id_fkey(id, name, handle, avatar_url, bio)`)
+      .in('author_id', ids)
+      .order('created_at', { ascending: false }).limit(50);
+      
+    if (data && !error) {
+      setFeedPosts(data.map((p: any) => ({
+        id: p.id, content: p.content || '', image: p.image_url || undefined, video: p.video_url || undefined,
+        likes: p.likes_count || 0, comments: p.comments_count || 0, timestamp: new Date(p.created_at).toLocaleString(),
+        author: { id: p.profiles?.id, name: p.profiles?.name, handle: p.profiles?.handle, avatar: p.profiles?.avatar_url, bio: p.profiles?.bio }
+      })));
+    }
+  };
+
+  const fetchGroups = async (userId: string) => {
+    const { data: members, error: memErr } = await supabase.from('group_members').select('group_id').eq('user_id', userId);
+    if (memErr || !members) return;
+    
+    const groupIds = members.map(m => m.group_id);
+    if (groupIds.length === 0) { setMyGroups([]); return; }
+
+    const { data: groups, error: grpErr } = await supabase.from('groups').select(`*, channels(*)`).in('id', groupIds);
+    if (groups) {
+      const mappedGroups: Group[] = groups.map(g => ({
+        id: g.id, name: g.name, icon: g.icon, description: g.description || '', members: 1, channels: g.channels || [],
+      }));
+      setMyGroups(mappedGroups);
+    }
+  };
 
   const showToast = (message: string) => {
     setToastMessage(message);
@@ -28,7 +113,46 @@ function App() {
     }
   };
 
+  const handleCreateGroup = async (payload: { name: string; description: string; icon: string; channels: string[]; is_private: boolean }) => {
+    if (!session) return;
+    
+    // 1. Insert Group
+    const { data: newGroup, error: grpErr } = await supabase.from('groups')
+      .insert({ name: payload.name, icon: payload.icon, description: payload.description, created_by: session.user.id, is_private: payload.is_private || false })
+      .select().single();
+
+    if (grpErr || !newGroup) {
+      showToast(grpErr?.message || '创建群组失败');
+      return;
+    }
+
+    // 2. Insert Channels
+    const channelInserts = payload.channels.map(c => ({ group_id: newGroup.id, name: c, type: 'text' }));
+    const { data: newChannels } = await supabase.from('channels').insert(channelInserts).select();
+
+    // 3. Insert Member
+    await supabase.from('group_members').insert({ group_id: newGroup.id, user_id: session.user.id, role: 'owner' });
+
+    const completeGroup: Group = {
+      id: newGroup.id, name: newGroup.name, icon: newGroup.icon || '', description: newGroup.description || '',
+      members: 1, channels: newChannels || [], is_private: newGroup.is_private, created_by: newGroup.created_by
+    };
+
+    setMyGroups(prev => [...prev, completeGroup]);
+    setActiveGroup(completeGroup);
+    setCurrentView(ViewState.GROUP);
+    showToast(`群组「${completeGroup.name}」创建成功并已存入数据库！`);
+  };
+
   const handleLeaveGroup = (groupId: string) => {
+    setMyGroups(prev => prev.filter(g => g.id !== groupId));
+    if (activeGroup?.id === groupId) {
+      setActiveGroup(null);
+      setCurrentView(ViewState.HOME);
+    }
+  };
+
+  const handleDisbandGroup = (groupId: string) => {
     setMyGroups(prev => prev.filter(g => g.id !== groupId));
     if (activeGroup?.id === groupId) {
       setActiveGroup(null);
@@ -46,40 +170,77 @@ function App() {
     if (view !== ViewState.GROUP) {
       setActiveGroup(null);
     }
+    if (view !== ViewState.PROFILE) {
+      setViewingUser(null);
+    }
+    if (view !== ViewState.HOME) {
+      setFocusedPostId(null);
+    }
+  };
+
+  if (authLoading) {
+    return (
+      <div className="h-screen w-full flex items-center justify-center bg-[#0c0a1a]">
+        <div className="w-10 h-10 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin shadow-[0_0_15px_rgba(99,102,241,0.5)]" />
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <Auth />;
+  }
+
+  const currentUser: User = {
+    id: session.user.id,
+    name: session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'User',
+    handle: '@' + (session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'user').toLowerCase().replace(/\s+/g, ''),
+    avatar: session.user.user_metadata?.avatar_url || `https://api.dicebear.com/9.x/glass/svg?seed=${session.user.id}`,
+    bio: session.user.user_metadata?.bio || '分享生活的新手',
+    location: session.user.user_metadata?.location || '未知'
   };
 
   return (
-    <div className="flex h-screen text-slate-100 font-sans overflow-hidden" style={{ backgroundColor: appBgColor }}>
+    <div className="flex h-screen text-slate-100 font-sans overflow-hidden relative" style={{ background: 'transparent' }}>
       {/* Navigation Sidebar (Desktop) */}
-      <Sidebar 
+      <Sidebar
         groups={myGroups}
         activeGroup={activeGroup}
         onSelectGroup={handleGroupSelect}
         onSelectView={handleViewSelect}
         currentView={currentView}
         showToast={showToast}
+        onCreateGroup={handleCreateGroup}
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 flex overflow-hidden relative w-full" style={{ backgroundColor: appBgColor }}>
+      <main className="flex-1 flex overflow-hidden relative w-full">
         {currentView === ViewState.HOME && (
-          <Feed currentUser={CURRENT_USER} posts={MOCK_POSTS} showToast={showToast} />
+          <Feed currentUser={currentUser} posts={feedPosts} showToast={showToast} groups={myGroups} 
+                focusedPostId={focusedPostId} onClearFocusedPost={() => setFocusedPostId(null)}
+                onAddPost={p => setFeedPosts([p, ...feedPosts])} 
+                onUpdatePost={p => setFeedPosts(prev => prev.map(old => old.id === p.id ? p : old))}
+                onDeletePost={id => setFeedPosts(prev => prev.filter(p => p.id !== id))}
+                onUserClick={u => { setViewingUser(u); setCurrentView(ViewState.PROFILE); }} />
         )}
-        
+
         {currentView === ViewState.GROUP && activeGroup && (
-          <GroupView group={activeGroup} currentUser={CURRENT_USER} showToast={showToast} onLeaveGroup={handleLeaveGroup} />
+          <GroupView group={activeGroup} currentUser={currentUser} showToast={showToast} onLeaveGroup={handleLeaveGroup} onDisbandGroup={handleDisbandGroup} />
         )}
 
         {currentView === ViewState.PROFILE && (
-          <Profile user={CURRENT_USER} posts={[]} showToast={showToast} appBgColor={appBgColor} setAppBgColor={setAppBgColor} />
+          <Profile user={viewingUser || currentUser} isCurrentUser={!viewingUser || viewingUser.id === currentUser.id} showToast={showToast} onOpenPost={id => { setFocusedPostId(id); setCurrentView(ViewState.HOME); }} currentUserId={currentUser.id} />
         )}
 
         {currentView === ViewState.DISCOVERY && (
-          <Discovery showToast={showToast} onJoinGroup={handleJoinGroup} />
+          <Discovery showToast={showToast} onJoinGroup={handleJoinGroup} currentUserId={currentUser.id} />
         )}
 
         {currentView === ViewState.CHAT && (
-          <DirectMessages currentUser={CURRENT_USER} showToast={showToast} />
+          <DirectMessages currentUser={currentUser} showToast={showToast} />
+        )}
+
+        {currentView === ViewState.NOTIFICATIONS && (
+          <Notifications currentUserId={currentUser.id} showToast={showToast} onRefreshGroups={() => session && fetchGroups(session.user.id)} />
         )}
 
         {currentView === ViewState.GROUPS_MOBILE && (
@@ -90,10 +251,23 @@ function App() {
       {/* Bottom Navigation (Mobile) */}
       <BottomNav currentView={currentView} onSelectView={handleViewSelect} />
 
-      {/* Global Toast */}
+      {/* Global Toast — compact glass pill */}
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 bg-indigo-600 text-white px-6 py-3 rounded-xl shadow-2xl z-[100] animate-in slide-in-from-bottom-5 fade-in duration-300">
-          {toastMessage}
+        <div className="fixed bottom-20 md:bottom-5 right-5 z-[100] animate-slide-up"
+          style={{
+            background: 'rgba(20,15,40,0.75)',
+            backdropFilter: 'blur(24px)',
+            WebkitBackdropFilter: 'blur(24px)',
+            border: '1px solid rgba(255,255,255,0.12)',
+            borderRadius: '999px',
+            padding: '6px 16px',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.35)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '7px',
+          }}>
+          <span className="w-1.5 h-1.5 rounded-full bg-gradient-to-r from-indigo-400 to-purple-400 shrink-0" />
+          <span className="text-white/80 text-xs font-medium whitespace-nowrap">{toastMessage}</span>
         </div>
       )}
     </div>

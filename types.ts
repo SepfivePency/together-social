@@ -4,7 +4,8 @@ export enum ViewState {
   PROFILE = 'PROFILE',
   DISCOVERY = 'DISCOVERY',
   CHAT = 'CHAT',
-  GROUPS_MOBILE = 'GROUPS_MOBILE'
+  GROUPS_MOBILE = 'GROUPS_MOBILE',
+  NOTIFICATIONS = 'NOTIFICATIONS'
 }
 
 export interface User {
@@ -15,6 +16,7 @@ export interface User {
   bio: string;
   school?: string;
   company?: string;
+  location?: string;
 }
 
 export interface Post {
@@ -22,6 +24,7 @@ export interface Post {
   author: User;
   content: string;
   image?: string;
+  video?: string;
   likes: number;
   comments: number;
   timestamp: string;
@@ -34,7 +37,7 @@ export interface Message {
   senderAvatar: string;
   content: string;
   timestamp: string;
-  isAi?: boolean;
+
 }
 
 export interface Channel {
@@ -50,4 +53,6 @@ export interface Group {
   description: string;
   channels: Channel[];
   members: number;
+  is_private?: boolean;
+  created_by?: string;
 }

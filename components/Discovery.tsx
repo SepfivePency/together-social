@@ -1,335 +1,139 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Users, Tag, PlusCircle, Globe, X, Building2, GraduationCap } from 'lucide-react';
-import { Group, Channel } from '../types';
+import { Search, Users, PlusCircle, X, Lock } from 'lucide-react';
+import { Group } from '../types';
+import { supabase } from '../lib/supabase';
 
-// Mock data for discovery
-const DISCOVERY_GROUPS = [
-  {
-    id: 'd1',
-    name: 'Photography Club',
-    description: 'A community for photographers of all levels. Weekly challenges and photo walks.',
-    members: 1250,
-    tags: ['Arts', 'Hobby'],
-    image: 'https://picsum.photos/id/250/400/200',
-    isPrivate: false
-  },
-  {
-    id: 'd2',
-    name: 'Varsity Esports',
-    description: 'Official campus esports team. League, Valorant, and Rocket League.',
-    members: 340,
-    tags: ['Gaming', 'Sports'],
-    image: 'https://picsum.photos/id/300/400/200',
-    isPrivate: true
-  },
-  {
-    id: 'd3',
-    name: 'Student Developers',
-    description: 'Connect with other student devs, hackathon teams, and project showcases.',
-    members: 890,
-    tags: ['Tech', 'Academic'],
-    image: 'https://picsum.photos/id/30/400/200',
-    isPrivate: false
-  },
-  {
-    id: 'd4',
-    name: 'Campus Musicians',
-    description: 'Find bandmates, discuss music theory, and promote your gigs.',
-    members: 560,
-    tags: ['Music', 'Arts'],
-    image: 'https://picsum.photos/id/450/400/200',
-    isPrivate: false
-  },
-  {
-    id: 'd5',
-    name: 'Debate Society',
-    description: 'Weekly debates on current events and philosophical topics.',
-    members: 120,
-    tags: ['Academic', 'Social'],
-    image: 'https://picsum.photos/id/500/400/200',
-    isPrivate: true
-  },
-  {
-    id: 'd6',
-    name: 'Culinary Arts',
-    description: 'Sharing recipes, cooking tips, and organizing potlucks.',
-    members: 430,
-    tags: ['Food', 'Hobby'],
-    image: 'https://picsum.photos/id/600/400/200',
-    isPrivate: false
-  }
-];
+interface DiscoveryProps {
+  showToast?: (msg: string) => void;
+  onJoinGroup?: (group: Group) => void;
+  currentUserId: string;
+}
 
-export const Discovery: React.FC<{ showToast?: (msg: string) => void, onJoinGroup?: (group: Group) => void }> = ({ showToast, onJoinGroup }) => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState('All');
-  const [verificationState, setVerificationState] = useState<'select' | 'school' | 'enterprise' | null>('select');
-  const [joinedGroups, setJoinedGroups] = useState<Set<string>>(new Set());
-  const [requestedGroups, setRequestedGroups] = useState<Set<string>>(new Set());
+export const Discovery: React.FC<DiscoveryProps> = ({ showToast, onJoinGroup, currentUserId }) => {
+  const [search, setSearch] = useState('');
+  const [joined, setJoined] = useState<Set<string>>(new Set());
+  const [requested, setRequested] = useState<Set<string>>(new Set());
+  const [allGroups, setAllGroups] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const handleJoin = (groupId: string, isPrivate: boolean) => {
-    if (isPrivate) {
-      setRequestedGroups(prev => {
-        const newSet = new Set(prev);
-        newSet.add(groupId);
-        return newSet;
+  useEffect(() => { fetchAllGroups(); }, []);
+
+  const fetchAllGroups = async () => {
+    setLoading(true);
+
+    // 1. Fetch all groups
+    const { data: groups } = await supabase.from('groups').select('*, channels(*)').order('created_at', { ascending: false });
+
+    // 2. Fetch groups I'm already in
+    const { data: myMemberships } = await supabase.from('group_members').select('group_id').eq('user_id', currentUserId);
+    const myGroupIds = new Set((myMemberships || []).map(m => m.group_id));
+    setJoined(myGroupIds);
+
+    // 3. Fetch my pending applications
+    const { data: myApps } = await supabase.from('notifications').select('group_id').eq('actor_id', currentUserId).eq('type', 'apply_join').eq('status', 'pending');
+    setRequested(new Set((myApps || []).map(a => a.group_id)));
+
+    // 4. Count members per group
+    if (groups) {
+      const enriched = await Promise.all(groups.map(async g => {
+        const { count } = await supabase.from('group_members').select('*', { count: 'exact', head: true }).eq('group_id', g.id);
+        return { ...g, member_count: count || 0 };
+      }));
+      setAllGroups(enriched);
+    }
+    setLoading(false);
+  };
+
+  const handleJoin = async (g: any) => {
+    if (g.is_private) {
+      // Send application notification to group owner
+      await supabase.from('notifications').insert({
+        user_id: g.created_by,
+        actor_id: currentUserId,
+        group_id: g.id,
+        type: 'apply_join'
       });
-      showToast?.('Join request sent!');
+      setRequested(p => new Set(p).add(g.id));
+      showToast?.('加入申请已发送，请等待审核！');
     } else {
-      setJoinedGroups(prev => {
-        const newSet = new Set(prev);
-        newSet.add(groupId);
-        return newSet;
+      // Direct join
+      await supabase.from('group_members').insert({ group_id: g.id, user_id: currentUserId, role: 'member' });
+      setJoined(p => new Set(p).add(g.id));
+      onJoinGroup?.({
+        id: g.id, name: g.name, icon: g.icon, description: g.description || '', members: (g.member_count || 0) + 1,
+        channels: g.channels || [], is_private: g.is_private, created_by: g.created_by,
       });
-      
-      const discoveryGroup = DISCOVERY_GROUPS.find(g => g.id === groupId);
-      if (discoveryGroup && onJoinGroup) {
-        const newGroup: Group = {
-          id: discoveryGroup.id,
-          name: discoveryGroup.name,
-          icon: discoveryGroup.image,
-          description: discoveryGroup.description,
-          members: discoveryGroup.members + 1,
-          channels: [
-            { id: `c1-${discoveryGroup.id}`, name: 'general', type: 'text' },
-            { id: `c2-${discoveryGroup.id}`, name: 'announcements', type: 'text' },
-            { id: `c3-${discoveryGroup.id}`, name: 'voice-lounge', type: 'voice' }
-          ]
-        };
-        onJoinGroup(newGroup);
-      }
-      showToast?.('Successfully joined group!');
+      showToast?.('成功加入群组！');
     }
   };
 
-  const handleVerificationSubmit = () => {
-    setVerificationState(null);
-    showToast?.('Verification submitted successfully!');
-  };
-
-  const filteredGroups = DISCOVERY_GROUPS.filter(group => {
-    const matchesSearch = group.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                         group.description.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesTab = activeTab === 'All' || group.tags.includes(activeTab);
-    return matchesSearch && matchesTab;
-  });
-
-  const categories = ['All', 'Tech', 'Arts', 'Sports', 'Gaming', 'Academic', 'Social'];
+  const filtered = allGroups.filter(g =>
+    !search || g.name?.toLowerCase().includes(search.toLowerCase()) || g.description?.toLowerCase().includes(search.toLowerCase())
+  );
 
   return (
-    <div className="flex-1 bg-slate-950 overflow-y-auto h-full p-4 md:p-8 pb-20 md:pb-8 relative">
-      {/* Identity Verification Modal */}
-      {verificationState && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl relative animate-in fade-in zoom-in duration-300">
-            <button 
-              onClick={() => setVerificationState(null)}
-              className="absolute top-4 right-4 text-slate-500 hover:text-white transition-colors"
-            >
-              <X size={20} />
-            </button>
-            
-            <div className="text-center mb-8 mt-2">
-              <h2 className="text-2xl font-bold text-white mb-2">Verify Your Identity</h2>
-              <p className="text-slate-400 text-sm">
-                Connect with your real community by verifying your school or enterprise email.
-              </p>
-            </div>
-
-            {verificationState === 'select' && (
-              <div className="space-y-4">
-                <button 
-                  onClick={() => setVerificationState('school')}
-                  className="w-full flex items-center gap-4 p-4 rounded-xl border border-slate-700 hover:border-indigo-500 hover:bg-indigo-500/10 transition-all group"
-                >
-                  <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center group-hover:bg-indigo-500/20 group-hover:text-indigo-400 text-slate-400 transition-colors">
-                    <GraduationCap size={24} />
-                  </div>
-                  <div className="text-left flex-1">
-                    <div className="font-semibold text-white">School Verification</div>
-                    <div className="text-xs text-slate-400">Use your .edu email address</div>
-                  </div>
-                </button>
-
-                <button 
-                  onClick={() => setVerificationState('enterprise')}
-                  className="w-full flex items-center gap-4 p-4 rounded-xl border border-slate-700 hover:border-cyan-500 hover:bg-cyan-500/10 transition-all group"
-                >
-                  <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center group-hover:bg-cyan-500/20 group-hover:text-cyan-400 text-slate-400 transition-colors">
-                    <Building2 size={24} />
-                  </div>
-                  <div className="text-left flex-1">
-                    <div className="font-semibold text-white">Enterprise Verification</div>
-                    <div className="text-xs text-slate-400">Use your company email address</div>
-                  </div>
-                </button>
-              </div>
-            )}
-
-            {verificationState === 'school' && (
-              <div className="space-y-4 text-left animate-in slide-in-from-right-4 duration-300">
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">School Name</label>
-                  <input type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500" placeholder="e.g. Stanford University" />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Student ID</label>
-                  <input type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500" placeholder="Your Student ID" />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Full Name</label>
-                  <input type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500" placeholder="Your Name" />
-                </div>
-                <button onClick={handleVerificationSubmit} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 rounded-lg transition-colors mt-4">
-                  Submit Verification
-                </button>
-                <button onClick={() => setVerificationState('select')} className="w-full text-slate-400 hover:text-white text-sm mt-2">
-                  Back
-                </button>
-              </div>
-            )}
-
-            {verificationState === 'enterprise' && (
-              <div className="space-y-4 text-left animate-in slide-in-from-right-4 duration-300">
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Company Name</label>
-                  <input type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500" placeholder="e.g. Google" />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Employee ID</label>
-                  <input type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500" placeholder="Your Employee ID" />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Full Name</label>
-                  <input type="text" className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-cyan-500" placeholder="Your Name" />
-                </div>
-                <button onClick={handleVerificationSubmit} className="w-full bg-cyan-600 hover:bg-cyan-700 text-white font-medium py-2 rounded-lg transition-colors mt-4">
-                  Submit Verification
-                </button>
-                <button onClick={() => setVerificationState('select')} className="w-full text-slate-400 hover:text-white text-sm mt-2">
-                  Back
-                </button>
-              </div>
-            )}
-
-            {verificationState === 'select' && (
-              <div className="mt-6 text-center">
-                <button 
-                  onClick={() => setVerificationState(null)}
-                  className="text-sm text-slate-500 hover:text-slate-300 transition-colors"
-                >
-                  Skip for now
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
+    <div className="flex-1 overflow-y-auto h-full p-4 md:p-8 pb-20 md:pb-8 relative z-10">
       <div className="max-w-6xl mx-auto space-y-8">
-        
         {/* Header */}
-        <div className="text-center space-y-4 py-8">
-          <h1 className="text-3xl md:text-4xl font-bold text-white bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-cyan-400">
-            Find Your Community
-          </h1>
-          <p className="text-slate-400 max-w-lg mx-auto">
-            Discover groups, clubs, and societies on campus. Connect with people who share your passions.
-          </p>
-          
-          {/* Search Bar */}
-          <div className="relative max-w-xl mx-auto mt-6">
-            <input
-              type="text"
-              placeholder="Search for groups..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-800 text-white rounded-full py-3 px-12 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent shadow-lg"
-            />
-            <Search className="absolute left-4 top-3.5 text-slate-500" size={20} />
+        <div className="text-center py-8 space-y-4">
+          <h1 className="text-3xl md:text-5xl font-bold gradient-text">发现你的社区</h1>
+          <p className="text-white/40 max-w-lg mx-auto">探索校园社团、社群和兴趣组织，与志同道合的人建立连接。</p>
+          <div className="relative max-w-xl mx-auto mt-6 transition-transform duration-300 hover:scale-[1.02] focus-within:scale-[1.04]">
+            <input type="text" placeholder="搜索群组…" value={search} onChange={e => setSearch(e.target.value)}
+              className="w-full glass border border-white/8 text-white rounded-2xl py-3.5 px-12 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 placeholder-white/20 shadow-xl" />
+            <Search className="absolute left-4 top-4 text-white/20" size={18} />
+            {search && <button onClick={() => setSearch('')} className="absolute right-4 top-4 text-white/20 hover:text-white"><X size={16} /></button>}
           </div>
         </div>
 
-        {/* Categories */}
-        <div className="flex flex-wrap justify-center gap-2">
-          {categories.map(cat => (
-            <button
-              key={cat}
-              onClick={() => setActiveTab(cat)}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all
-              ${activeTab === cat 
-                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/25' 
-                : 'bg-slate-900 text-slate-400 hover:bg-slate-800 hover:text-white border border-slate-800'}`}
-            >
-              {cat}
-            </button>
-          ))}
-        </div>
-
-        {/* Results Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredGroups.map(group => (
-            <div key={group.id} className="bg-slate-900 rounded-xl overflow-hidden border border-slate-800 hover:border-slate-700 transition-all hover:shadow-xl group">
-              <div className="h-32 overflow-hidden relative">
-                <img 
-                  src={group.image} 
-                  alt={group.name} 
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                />
-                <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm px-2 py-1 rounded text-xs text-white font-medium flex items-center gap-1">
-                  {group.isPrivate ? 'Private' : 'Public'}
-                </div>
-              </div>
-              
-              <div className="p-5">
-                <div className="flex justify-between items-start mb-2">
-                  <h3 className="text-lg font-bold text-white line-clamp-1">{group.name}</h3>
-                </div>
-                
-                <p className="text-slate-400 text-sm mb-4 line-clamp-2 min-h-[40px]">
-                  {group.description}
-                </p>
-
-                <div className="flex flex-wrap gap-2 mb-4">
-                  {group.tags.map(tag => (
-                    <span key={tag} className="px-2 py-0.5 rounded bg-slate-800 text-slate-400 text-xs border border-slate-700">
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-
-                <div className="flex items-center justify-between pt-4 border-t border-slate-800">
-                  <div className="flex items-center gap-1.5 text-slate-500 text-sm">
-                    <Users size={16} />
-                    <span>{group.members}</span>
+        {/* Grid */}
+        {loading ? (
+          <div className="flex justify-center py-20">
+            <div className="w-8 h-8 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {filtered.map(g => {
+              const isMember = joined.has(g.id);
+              const isPending = requested.has(g.id);
+              const isOwner = g.created_by === currentUserId;
+              return (
+                <div key={g.id} className="glass rounded-2xl overflow-hidden gradient-border group hover:bg-white/[0.07] transition-all">
+                  <div className="h-36 overflow-hidden relative">
+                    <img src={g.icon || 'https://picsum.photos/id/1/400/200'} alt={g.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                    <div className="absolute inset-0" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.6) 0%, transparent 60%)' }} />
+                    <div className={`absolute top-2.5 right-2.5 glass text-[10px] font-medium px-2.5 py-1 rounded-full flex items-center gap-1 ${g.is_private ? 'text-amber-300' : 'text-emerald-300'}`}>
+                      {g.is_private ? <><Lock size={10} /> 私密</> : '🌐 公开'}
+                    </div>
                   </div>
-                  
-                  <button 
-                    onClick={() => handleJoin(group.id, group.isPrivate)}
-                    disabled={joinedGroups.has(group.id) || requestedGroups.has(group.id)}
-                    className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed
-                    ${group.isPrivate 
-                      ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' 
-                      : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
-                  >
-                    {group.isPrivate 
-                      ? (requestedGroups.has(group.id) ? 'Requested' : 'Request') 
-                      : (joinedGroups.has(group.id) ? 'Joined' : 'Join')}
-                    {!group.isPrivate && !joinedGroups.has(group.id) && <PlusCircle size={14} />}
-                  </button>
+                  <div className="p-5">
+                    <h3 className="text-base font-bold text-white mb-1 truncate">{g.name}</h3>
+                    <p className="text-white/40 text-sm mb-4 line-clamp-2">{g.description || '暂无简介'}</p>
+                    <div className="flex items-center justify-between pt-3 border-t border-white/5">
+                      <div className="flex items-center gap-1.5 text-white/30 text-sm"><Users size={14} />{g.member_count} 人</div>
+                      {isOwner ? (
+                        <span className="text-xs text-indigo-300 font-medium glass px-3 py-1.5 rounded-xl">我创建的</span>
+                      ) : (
+                        <button onClick={() => handleJoin(g)}
+                          disabled={isMember || isPending}
+                          className={`px-4 py-1.5 rounded-xl text-sm font-medium transition-all flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed btn-glow
+                          ${g.is_private ? 'glass glass-hover text-white/60 hover:text-white' : 'bg-gradient-to-r from-indigo-500 to-purple-600 text-white shadow-md shadow-indigo-500/20'}`}>
+                          {isMember ? '✓ 已加入' : isPending ? '⏳ 已申请' : g.is_private ? '申请加入' : <><PlusCircle size={14} /> 加入</>}
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-          ))}
-        </div>
-        
-        {filteredGroups.length === 0 && (
-            <div className="text-center py-12 text-slate-500">
-                <div className="flex justify-center mb-4">
-                    <Globe size={48} className="opacity-20" />
-                </div>
-                <p>No groups found matching your search.</p>
-            </div>
+              );
+            })}
+          </div>
+        )}
+
+        {!loading && !filtered.length && (
+          <div className="text-center py-16 text-white/20">
+            <Users className="mx-auto mb-3 opacity-20" size={40} />
+            <p>未找到匹配群组</p>
+          </div>
         )}
       </div>
     </div>

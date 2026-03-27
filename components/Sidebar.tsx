@@ -1,6 +1,8 @@
-import React from 'react';
-import { Home, User, Plus, Compass, MessageCircle } from 'lucide-react';
+import React, { useState } from 'react';
+import { Home, User, Plus, Compass, MessageCircle, Bell, LogOut } from 'lucide-react';
 import { Group, ViewState } from '../types';
+import { CreateGroupModal } from './CreateGroupModal';
+import { supabase } from '../lib/supabase';
 
 interface SidebarProps {
   groups: Group[];
@@ -9,104 +11,172 @@ interface SidebarProps {
   onSelectView: (view: ViewState) => void;
   currentView: ViewState;
   showToast?: (msg: string) => void;
+  onCreateGroup?: (group: Group) => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
-  groups,
-  activeGroup,
-  onSelectGroup,
-  onSelectView,
-  currentView,
-  showToast,
+  groups, activeGroup, onSelectGroup, onSelectView, currentView, showToast, onCreateGroup,
 }) => {
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+
+  const navItems = [
+    { id: 'home', view: ViewState.HOME, icon: Home, label: '首页', color: 'from-indigo-400 to-purple-500' },
+    { id: 'discovery', view: ViewState.DISCOVERY, icon: Compass, label: '发现', color: 'from-emerald-400 to-cyan-400' },
+    { id: 'chat', view: ViewState.CHAT, icon: MessageCircle, label: '消息', color: 'from-pink-400 to-rose-400' },
+    { id: 'notifications', view: ViewState.NOTIFICATIONS, icon: Bell, label: '通知', color: 'from-amber-400 to-orange-400' },
+  ];
+
+  const isActive = (id: string, view?: ViewState, groupId?: string) => {
+    if (groupId) return currentView === ViewState.GROUP && activeGroup?.id === groupId;
+    return currentView === view;
+  };
 
   return (
-    <div className="hidden md:flex w-[72px] bg-slate-900/80 backdrop-blur-md flex-col items-center py-4 gap-4 border-r border-slate-800 h-screen overflow-y-auto shrink-0 z-50">
-      {/* Home Feed */}
-      <button
-        onClick={() => onSelectView(ViewState.HOME)}
-        className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-200 hover:bg-indigo-500 hover:text-white group relative
-        ${currentView === ViewState.HOME ? 'bg-indigo-500 text-white' : 'bg-slate-800 text-indigo-400'}`}
-      >
-        <Home size={24} />
-        <span className="absolute left-16 bg-black text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none transition-opacity z-50">
-          Home Feed
-        </span>
-      </button>
+    <>
+      {/* Expanded macOS-style Dock */}
+      <div className="hidden md:flex w-[100px] h-screen flex-col items-center py-6 shrink-0 z-50 relative">
+        {/* The dock container - full height floating glass pill */}
+        <div className="w-[72px] h-full flex flex-col items-center py-6 px-1.5 rounded-[36px] relative overflow-hidden"
+          style={{
+            background: 'rgba(255,255,255,0.08)',
+            backdropFilter: 'blur(40px) saturate(2)',
+            WebkitBackdropFilter: 'blur(40px) saturate(2)',
+            border: '1px solid rgba(255,255,255,0.15)',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.1)',
+          }}>
 
-      {/* Discovery */}
-      <button
-        onClick={() => onSelectView(ViewState.DISCOVERY)}
-        className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-200 hover:bg-green-500 hover:text-white group relative
-        ${currentView === ViewState.DISCOVERY ? 'bg-green-500 text-white' : 'bg-slate-800 text-green-400'}`}
-      >
-        <Compass size={24} />
-        <span className="absolute left-16 bg-black text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none transition-opacity z-50">
-          Discovery
-        </span>
-      </button>
+          <div className="flex-1 w-full flex flex-col items-center gap-2 overflow-y-auto pt-4 pb-20"
+               style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+               
+            <style>{`.overflow-y-auto::-webkit-scrollbar { display: none; }`}</style>
 
-      {/* Chat */}
-      <button
-        onClick={() => onSelectView(ViewState.CHAT)}
-        className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-200 hover:bg-pink-500 hover:text-white group relative
-        ${currentView === ViewState.CHAT ? 'bg-pink-500 text-white' : 'bg-slate-800 text-pink-400'}`}
-      >
-        <MessageCircle size={24} />
-        <span className="absolute left-16 bg-black text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none transition-opacity z-50">
-          Messages
-        </span>
-      </button>
+            {/* Nav buttons */}
+            {navItems.map(({ id, view, icon: Icon, label, color }) => {
+              const active = isActive(id, view);
+              const hovered = hoveredId === id;
+              return (
+                <button key={id}
+                  onMouseEnter={() => setHoveredId(id)}
+                  onMouseLeave={() => setHoveredId(null)}
+                  onClick={() => onSelectView(view)}
+                  className="relative flex flex-col items-center group"
+                  style={{ transition: 'transform 0.2s cubic-bezier(0.34,1.56,0.64,1)', transform: hovered ? 'scale(1.2) translateY(-3px)' : 'scale(1)' }}>
+                  <div className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-all duration-200
+                    ${active ? `bg-gradient-to-br ${color} shadow-lg ring-1 ring-white/20` : 'hover:bg-white/10 bg-white/5'}`}
+                    style={active ? { boxShadow: `0 4px 20px rgba(99,102,241,0.4)` } : {}}>
+                    <Icon size={20} className={active ? 'text-white' : 'text-white/50'} />
+                  </div>
+                  {active && <div className="mt-1.5 w-1 h-1 rounded-full bg-white/60" />}
+                  {/* Tooltip */}
+                  <span className="absolute left-[calc(100%+14px)] top-1/2 -translate-y-1/2 glass-strong text-white text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-50 shadow-xl"
+                    style={{ border: '1px solid rgba(255,255,255,0.12)' }}>
+                    {label}
+                  </span>
+                </button>
+              );
+            })}
 
-      <div className="w-8 h-[2px] bg-slate-800 rounded-full" />
+            {/* Divider */}
+            <div className="w-6 h-px my-2" style={{ background: 'rgba(255,255,255,0.15)' }} />
 
-      {/* Group List */}
-      {groups.map((group) => (
-        <button
-          key={group.id}
-          onClick={() => onSelectGroup(group)}
-          className={`w-12 h-12 rounded-full overflow-hidden transition-all duration-200 hover:rounded-2xl border-2 group relative
-          ${
-            currentView === ViewState.GROUP && activeGroup?.id === group.id
-              ? 'border-indigo-500 ring-2 ring-indigo-500/20 rounded-2xl'
-              : 'border-transparent hover:border-indigo-400'
-          }`}
-        >
-          <img
-            src={group.icon}
-            alt={group.name}
-            className="w-full h-full object-cover"
-          />
-          <span className="absolute left-16 bg-black text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none transition-opacity z-50">
-            {group.name}
-          </span>
-        </button>
-      ))}
+            {/* Groups */}
+            {groups.map(g => {
+              const active = isActive('', undefined, g.id);
+              const hovered = hoveredId === g.id;
+              return (
+                <button key={g.id}
+                  onMouseEnter={() => setHoveredId(g.id)}
+                  onMouseLeave={() => setHoveredId(null)}
+                  onClick={() => onSelectGroup(g)}
+                  className="relative flex flex-col items-center group"
+                  style={{ transition: 'transform 0.2s cubic-bezier(0.34,1.56,0.64,1)', transform: hovered ? 'scale(1.2) translateY(-3px)' : 'scale(1)' }}>
+                  <div className={`w-11 h-11 rounded-2xl overflow-hidden transition-all duration-200
+                    ${active ? 'ring-2 ring-white/60 ring-offset-2 ring-offset-transparent shadow-lg' : 'ring-1 ring-white/15 hover:ring-white/30'}`}>
+                    <img src={g.icon} alt={g.name} className="w-full h-full object-cover" />
+                  </div>
+                  {active && <div className="mt-1.5 w-1 h-1 rounded-full bg-white/60" />}
+                  <span className="absolute left-[calc(100%+14px)] top-1/2 -translate-y-1/2 glass-strong text-white text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-50 shadow-xl"
+                    style={{ border: '1px solid rgba(255,255,255,0.12)' }}>
+                    {g.name}
+                  </span>
+                </button>
+              );
+            })}
 
-      {/* Add Group */}
-      <button 
-        onClick={() => showToast?.('Create Group feature coming soon!')}
-        className="w-12 h-12 rounded-full bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white flex items-center justify-center transition-all duration-200 group relative"
-      >
-        <Plus size={24} />
-        <span className="absolute left-16 bg-black text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none transition-opacity z-50">
-          Create Group
-        </span>
-      </button>
-      
-      <div className="flex-1" />
+            {/* Add group */}
+            <button
+              onMouseEnter={() => setHoveredId('add')}
+              onMouseLeave={() => setHoveredId(null)}
+              onClick={() => setShowCreateModal(true)}
+              className="relative flex flex-col items-center group my-1"
+              style={{ transition: 'transform 0.2s cubic-bezier(0.34,1.56,0.64,1)', transform: hoveredId === 'add' ? 'scale(1.2) translateY(-3px)' : 'scale(1)' }}>
+              <div className="w-11 h-11 rounded-2xl flex items-center justify-center bg-white/5 hover:bg-white/12 border border-dashed border-white/25 hover:border-white/50 transition-all">
+                <Plus size={18} className="text-white/40 group-hover:text-white/80" />
+              </div>
+              <span className="absolute left-[calc(100%+14px)] top-1/2 -translate-y-1/2 glass-strong text-white text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-50 shadow-xl"
+                style={{ border: '1px solid rgba(255,255,255,0.12)' }}>
+                创建群组
+              </span>
+            </button>
 
-      {/* Profile */}
-      <button 
-        onClick={() => onSelectView(ViewState.PROFILE)}
-        className={`w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center transition-all duration-200 hover:bg-slate-700 group relative
-         ${currentView === ViewState.PROFILE ? 'bg-slate-700 text-white' : 'text-slate-400'}`}
-      >
-        <User size={24} />
-        <span className="absolute left-16 bg-black text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none transition-opacity z-50">
-          My Profile
-        </span>
-      </button>
-    </div>
+            {/* Divider */}
+            <div className="w-6 h-px my-2" style={{ background: 'rgba(255,255,255,0.15)' }} />
+
+            {/* Profile */}
+            <button
+              onMouseEnter={() => setHoveredId('profile')}
+              onMouseLeave={() => setHoveredId(null)}
+              onClick={() => onSelectView(ViewState.PROFILE)}
+              className="relative flex flex-col items-center group"
+              style={{ transition: 'transform 0.2s cubic-bezier(0.34,1.56,0.64,1)', transform: hoveredId === 'profile' ? 'scale(1.2) translateY(-3px)' : 'scale(1)' }}>
+              <div className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-all
+                ${currentView === ViewState.PROFILE ? 'bg-white/20 ring-2 ring-white/40 shadow-lg' : 'bg-white/5 hover:bg-white/12 ring-1 ring-white/10'}`}>
+                <User size={19} className={currentView === ViewState.PROFILE ? 'text-white' : 'text-white/50'} />
+              </div>
+              {currentView === ViewState.PROFILE && <div className="mt-1.5 w-1 h-1 rounded-full bg-white/60" />}
+              <span className="absolute left-[calc(100%+14px)] top-1/2 -translate-y-1/2 glass-strong text-white text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-50 shadow-xl"
+                style={{ border: '1px solid rgba(255,255,255,0.12)' }}>
+                我的
+              </span>
+            </button>
+
+            {/* Logout */}
+            <button
+              onMouseEnter={() => setHoveredId('logout')}
+              onMouseLeave={() => setHoveredId(null)}
+              onClick={async () => { await supabase.auth.signOut(); window.location.reload(); }}
+              className="relative flex flex-col items-center group"
+              style={{ transition: 'transform 0.2s cubic-bezier(0.34,1.56,0.64,1)', transform: hoveredId === 'logout' ? 'scale(1.2) translateY(-3px)' : 'scale(1)' }}>
+              <div className="w-11 h-11 rounded-2xl flex items-center justify-center bg-white/5 hover:bg-red-500/15 ring-1 ring-white/10 hover:ring-red-500/30 transition-all">
+                <LogOut size={19} className="text-white/40 group-hover:text-red-400" />
+              </div>
+              <span className="absolute left-[calc(100%+14px)] top-1/2 -translate-y-1/2 glass-strong text-white text-xs px-2.5 py-1.5 rounded-lg whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-50 shadow-xl"
+                style={{ border: '1px solid rgba(255,255,255,0.12)' }}>
+                退出登录
+              </span>
+            </button>
+          </div>
+
+          {/* Together Logo at bottom */}
+          <div className="absolute bottom-6 w-full flex flex-col items-center justify-center pointer-events-none z-10">
+            <span className="text-[15px] tracking-wide text-transparent bg-clip-text font-bold"
+                  style={{ 
+                    fontFamily: "'Pacifico', cursive",
+                    backgroundImage: 'linear-gradient(135deg, #a78bfa, #f472b6, #38bdf8)',
+                    filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.5))'
+                  }}>
+              Together
+            </span>
+          </div>
+        </div>
+
+        {/* Dock reflection */}
+        <div className="absolute bottom-0 left-0 right-0 h-32 pointer-events-none"
+          style={{ background: 'linear-gradient(to top, rgba(99,102,241,0.05), transparent)' }} />
+      </div>
+
+      <CreateGroupModal isOpen={showCreateModal} onClose={() => setShowCreateModal(false)} onCreate={g => onCreateGroup?.(g)} showToast={showToast} />
+    </>
   );
 };
