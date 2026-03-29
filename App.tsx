@@ -24,6 +24,9 @@ function App() {
   const [feedPosts, setFeedPosts] = useState<Post[]>([]);
   const [viewingUser, setViewingUser] = useState<User | null>(null);
   const [focusedPostId, setFocusedPostId] = useState<string | null>(null);
+  const [friends, setFriends] = useState<User[]>([]);
+  const [chatWithUser, setChatWithUser] = useState<User | null>(null);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -31,7 +34,10 @@ function App() {
       setAuthLoading(false);
       if (session) {
         fetchGroups(session.user.id);
+        fetchGroups(session.user.id);
         fetchFeed(session.user.id);
+        fetchFriends(session.user.id);
+        fetchNotifications(session.user.id);
       }
     });
 
@@ -41,12 +47,35 @@ function App() {
       setSession(session);
       if (session) {
         fetchGroups(session.user.id);
+        fetchGroups(session.user.id);
         fetchFeed(session.user.id);
+        fetchFriends(session.user.id);
+        fetchNotifications(session.user.id);
       }
     });
 
     return () => subscription.unsubscribe();
+    return () => subscription.unsubscribe();
   }, []);
+
+  const fetchFriends = async (userId: string) => {
+    const { data: d1 } = await supabase.from('friendships').select('friend_id, status, profiles!friendships_friend_id_fkey(id, name, avatar_url, bio, handle)').eq('user_id', userId).eq('status', 'accepted');
+    const { data: d2 } = await supabase.from('friendships').select('user_id, status, profiles!friendships_user_id_fkey(id, name, avatar_url, bio, handle)').eq('friend_id', userId).eq('status', 'accepted');
+    
+    const combined = [
+      ...(d1 || []).map((f: any) => ({ id: f.profiles?.id, name: f.profiles?.name, handle: f.profiles?.handle, avatar: f.profiles?.avatar_url, bio: f.profiles?.bio })),
+      ...(d2 || []).map((f: any) => ({ id: f.profiles?.id, name: f.profiles?.name, handle: f.profiles?.handle, avatar: f.profiles?.avatar_url, bio: f.profiles?.bio }))
+    ].filter(u => u.id); // remove nulls
+    
+    const unique = Array.from(new Map(combined.map(item => [item.id, item])).values());
+    setFriends(unique);
+  };
+
+  const fetchNotifications = async (userId: string) => {
+    // Only fetch unread count for the dock icon badge or animation
+    const { count } = await supabase.from('notifications').select('*', { count: 'exact', head: true }).eq('user_id', userId).eq('status', 'pending');
+    setUnreadNotifications(count || 0);
+  };
 
   const fetchFeed = async (userId: string) => {
     // 1. Get users who share at least one group with me
@@ -92,8 +121,15 @@ function App() {
 
     const { data: groups, error: grpErr } = await supabase.from('groups').select(`*, channels(*)`).in('id', groupIds);
     if (groups) {
+      // Get member counts to fix "1 member" bug
+      const { data: allMembers } = await supabase.from('group_members').select('group_id').in('group_id', groupIds);
+      const memberCounts = (allMembers || []).reduce((acc: any, curr) => {
+        acc[curr.group_id] = (acc[curr.group_id] || 0) + 1;
+        return acc;
+      }, {});
+      
       const mappedGroups: Group[] = groups.map(g => ({
-        id: g.id, name: g.name, icon: g.icon, description: g.description || '', members: 1, channels: g.channels || [],
+        id: g.id, name: g.name, icon: g.icon, description: g.description || '', members: memberCounts[g.id] || 1, channels: g.channels || [], created_by: g.created_by, is_private: g.is_private
       }));
       setMyGroups(mappedGroups);
     }
@@ -141,7 +177,10 @@ function App() {
     showToast(`群组「${completeGroup.name}」创建成功并已存入数据库！`);
   };
 
-  const handleLeaveGroup = (groupId: string) => {
+  const handleLeaveGroup = async (groupId: string) => {
+    if (session) {
+      await supabase.from('group_members').delete().match({ group_id: groupId, user_id: session.user.id });
+    }
     setMyGroups(prev => prev.filter(g => g.id !== groupId));
     if (activeGroup?.id === groupId) {
       setActiveGroup(null);
@@ -201,12 +240,15 @@ function App() {
       {/* Navigation Sidebar (Desktop) */}
       <Sidebar
         groups={myGroups}
+        friends={friends}
         activeGroup={activeGroup}
         onSelectGroup={handleGroupSelect}
+        onSelectFriend={friend => { setChatWithUser(friend); setCurrentView(ViewState.CHAT); }}
         onSelectView={handleViewSelect}
         currentView={currentView}
         showToast={showToast}
         onCreateGroup={handleCreateGroup}
+        unreadCount={unreadNotifications}
       />
 
       {/* Main Content Area */}
@@ -225,7 +267,7 @@ function App() {
         )}
 
         {currentView === ViewState.PROFILE && (
-          <Profile user={viewingUser || currentUser} isCurrentUser={!viewingUser || viewingUser.id === currentUser.id} showToast={showToast} onOpenPost={id => { setFocusedPostId(id); setCurrentView(ViewState.HOME); }} currentUserId={currentUser.id} />
+          <Profile user={viewingUser || currentUser} isCurrentUser={!viewingUser || viewingUser.id === currentUser.id} showToast={showToast} onOpenPost={id => { setFocusedPostId(id); setCurrentView(ViewState.HOME); }} currentUserId={currentUser.id} onUserClick={u => { setViewingUser(u); setCurrentView(ViewState.PROFILE); }} />
         )}
 
         {currentView === ViewState.DISCOVERY && (
@@ -233,11 +275,14 @@ function App() {
         )}
 
         {currentView === ViewState.CHAT && (
-          <DirectMessages currentUser={currentUser} showToast={showToast} />
+          <DirectMessages currentUser={currentUser} chatWithUser={chatWithUser} setChatWithUser={setChatWithUser} friends={friends} showToast={showToast} />
         )}
 
         {currentView === ViewState.NOTIFICATIONS && (
-          <Notifications currentUserId={currentUser.id} showToast={showToast} onRefreshGroups={() => session && fetchGroups(session.user.id)} />
+          <Notifications currentUserId={currentUser.id} showToast={showToast} 
+            onRefreshGroups={() => session && fetchGroups(session.user.id)}
+            onNotificationsRead={() => setUnreadNotifications(0)} 
+          />
         )}
 
         {currentView === ViewState.GROUPS_MOBILE && (

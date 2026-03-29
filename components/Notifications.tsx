@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Bell, Check, X, UserMinus, Users, Trash2 } from 'lucide-react';
+import { Bell, Check, X, UserMinus, Users, Trash2, BellOff, Settings } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 interface Notification {
@@ -19,13 +19,19 @@ interface NotificationsProps {
   currentUserId: string;
   showToast?: (msg: string) => void;
   onRefreshGroups?: () => void;
+  onNotificationsRead?: () => void;
 }
 
-export const Notifications: React.FC<NotificationsProps> = ({ currentUserId, showToast, onRefreshGroups }) => {
+export const Notifications: React.FC<NotificationsProps> = ({ currentUserId, showToast, onRefreshGroups, onNotificationsRead }) => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isMuted, setIsMuted] = useState(() => localStorage.getItem('notifications_muted') === 'true');
+  const [showSettings, setShowSettings] = useState(false);
 
-  useEffect(() => { fetchNotifications(); }, []);
+  useEffect(() => { 
+    fetchNotifications(); 
+    if (onNotificationsRead) onNotificationsRead();
+  }, []);
 
   const fetchNotifications = async () => {
     setLoading(true);
@@ -119,7 +125,31 @@ export const Notifications: React.FC<NotificationsProps> = ({ currentUserId, sho
 
   return (
     <div className="flex-1 overflow-y-auto h-full p-4 md:p-8 pb-20 md:pb-8 relative z-10">
-      <div className="max-w-2xl mx-auto space-y-5">
+      <div className="max-w-2xl mx-auto space-y-5 relative">
+        {/* Settings button */}
+        <div className="absolute top-4 right-4 z-20">
+          <button onClick={() => setShowSettings(!showSettings)} className="w-10 h-10 glass rounded-full flex items-center justify-center text-white/50 hover:text-white transition-all">
+            <Settings size={18} />
+          </button>
+          {showSettings && (
+            <>
+              <div className="fixed inset-0 z-30" onClick={() => setShowSettings(false)} />
+              <div className="absolute top-12 right-0 w-48 glass-strong rounded-2xl z-40 overflow-hidden shadow-2xl animate-fade-in" style={{ border: '1px solid rgba(255,255,255,0.1)' }}>
+                <button onClick={() => {
+                  const newVal = !isMuted;
+                  setIsMuted(newVal);
+                  localStorage.setItem('notifications_muted', String(newVal));
+                  showToast?.(newVal ? '已开启通知免打扰' : '已关闭通知免打扰');
+                  setShowSettings(false);
+                }} className="w-full flex items-center gap-3 px-4 py-3 text-sm text-white/70 hover:bg-white/10 hover:text-white transition-all">
+                  {isMuted ? <Bell size={16} /> : <BellOff size={16} />}
+                  {isMuted ? '关闭静默通知' : '开启静默通知'}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+
         <div className="text-center py-6 space-y-2">
           <h1 className="text-2xl md:text-4xl font-bold gradient-text">通知 · 审核中心</h1>
           <p className="text-white/35 text-sm">管理群组申请、查看系统通知</p>

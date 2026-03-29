@@ -1,32 +1,101 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, MoreVertical, Search, Pin, PinOff, X, Trash2, BellOff, Bell, Flag, MessageCircle, Image as ImageIcon, Video as VideoIcon } from 'lucide-react';
 import { Message, User } from '../types';
+import { supabase } from '../lib/supabase';
 
 interface DirectMessagesProps {
   currentUser: User;
+  friends: User[];
+  chatWithUser: User | null;
+  setChatWithUser: (user: User | null) => void;
   showToast?: (msg: string) => void;
 }
 
-const INITIAL_DM_USERS: any[] = [];
-const INITIAL_MESSAGES: Message[] = [];
+const EMOJI_LIST = ['😀','😂','🥰','😎','🥺','😭','😡','👍','🎉','❤️','✨','🔥','🤔','👀','🙏','💪'];
 
-export const DirectMessages: React.FC<DirectMessagesProps> = ({ currentUser, showToast }) => {
-  const [selectedUser, setSelectedUser] = useState<string | null>('u2');
-  const [pinnedIds, setPinnedIds] = useState<string[]>(['u2']);
+export const DirectMessages: React.FC<DirectMessagesProps> = ({ currentUser, friends, chatWithUser, setChatWithUser, showToast }) => {
+  const [pinnedIds, setPinnedIds] = useState<string[]>([]);
   const [mutedIds, setMutedIds] = useState<Set<string>>(new Set());
   const [inputText, setInputText] = useState('');
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [selectedVideo, setSelectedVideo] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
 
+  const getDMChannelId = (uid1: string, uid2: string) => {
+    return [uid1, uid2].sort().join('_');
+  };
+
+  useEffect(() => {
+    if (!chatWithUser) {
+      setMessages([]);
+      return;
+    }
+    
+    const channelId = getDMChannelId(currentUser.id, chatWithUser.id);
+    
+    // 1. Fetch existing
+    const fetchMessages = async () => {
+      const { data } = await supabase
+        .from('messages')
+        .select('*, profiles(id, name, handle, avatar_url, bio)')
+        .eq('channel_id', channelId)
+        .order('created_at', { ascending: true });
+
+      if (data) {
+        setMessages(data.map((m: any) => ({
+          id: m.id, senderId: m.profiles?.id || m.sender_id, senderName: m.profiles?.name || '未知',
+          senderAvatar: m.profiles?.avatar_url, content: m.content, timestamp: new Date(m.created_at).toLocaleString()
+        })));
+      } else {
+        setMessages([]);
+      }
+    };
+    fetchMessages();
+
+    // 2. Realtime Subscription
+    const subscription = supabase
+      .channel(`dm:${channelId}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `channel_id=eq.${channelId}`
+      }, async (payload) => {
+        const newMsg = payload.new as any;
+        const { data: profile } = await supabase.from('profiles').select('id, name, avatar_url').eq('id', newMsg.sender_id).single();
+        
+        setMessages(prev => {
+          if (prev.find(m => m.id === newMsg.id)) return prev;
+          
+          const msgObj = {
+            id: newMsg.id,
+            senderId: newMsg.sender_id,
+            senderName: profile?.name || '未知',
+            senderAvatar: profile?.avatar_url,
+            content: newMsg.content,
+            timestamp: new Date(newMsg.created_at).toLocaleString()
+          };
+          
+          const newArray = [...prev, msgObj];
+          return newArray.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+        });
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(subscription);
+    };
+  }, [chatWithUser, currentUser.id]);
+
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [messages, selectedUser]);
+  }, [messages, chatWithUser]);
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -48,29 +117,37 @@ export const DirectMessages: React.FC<DirectMessagesProps> = ({ currentUser, sho
     }
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!inputText.trim() && !selectedImage && !selectedVideo) return;
-    if (inputText.trim()) {
-      setMessages(prev => [...prev, {
-        id: Date.now().toString(), senderId: currentUser.id, senderName: currentUser.name,
-        senderAvatar: currentUser.avatar, content: inputText, timestamp: '刚刚'
-      }]);
-    }
-    if (selectedImage) {
-      setMessages(prev => [...prev, {
-        id: (Date.now() + 1).toString(), senderId: currentUser.id, senderName: currentUser.name,
-        senderAvatar: currentUser.avatar, content: `__IMG__${selectedImage}`, timestamp: '刚刚'
-      }]);
-      setSelectedImage(null);
-    }
-    if (selectedVideo) {
-      setMessages(prev => [...prev, {
-        id: (Date.now() + 2).toString(), senderId: currentUser.id, senderName: currentUser.name,
-        senderAvatar: currentUser.avatar, content: `__VID__${selectedVideo}`, timestamp: '刚刚'
-      }]);
-      setSelectedVideo(null);
-    }
+    if (!chatWithUser) return;
+    
+    const channelId = getDMChannelId(currentUser.id, chatWithUser.id);
+    let contents = [];
+    if (inputText.trim()) contents.push(inputText.trim());
+    if (selectedImage) contents.push(`__IMG__${selectedImage}`);
+    if (selectedVideo) contents.push(`__VID__${selectedVideo}`);
+    
     setInputText('');
+    setSelectedImage(null);
+    setSelectedVideo(null);
+    setShowEmojiPicker(false);
+    
+    for (const content of contents) {
+      const { data } = await supabase.from('messages').insert({
+        channel_id: channelId, sender_id: currentUser.id, content
+      }).select('*, profiles(id, name, handle, avatar_url, bio)').single();
+      
+      if (data) {
+        setMessages(prev => {
+          if (prev.find(m => m.id === data.id)) return prev;
+          const msgObj = {
+            id: data.id, senderId: data.profiles?.id || data.sender_id, senderName: data.profiles?.name || '我',
+            senderAvatar: data.profiles?.avatar_url, content: data.content, timestamp: new Date(data.created_at).toLocaleString()
+          };
+          return [...prev, msgObj].sort((a,b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+        });
+      }
+    }
   };
 
   const togglePin = (e: React.MouseEvent, id: string) => {
@@ -78,15 +155,14 @@ export const DirectMessages: React.FC<DirectMessagesProps> = ({ currentUser, sho
     setPinnedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   };
 
-  const filtered = INITIAL_DM_USERS.filter(u =>
-    u.name.toLowerCase().includes(searchQuery.toLowerCase()) || u.lastMsg.includes(searchQuery)
+  const filtered = friends.filter(u =>
+    u.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const pinnedUsers = filtered.filter(u => pinnedIds.includes(u.id));
   const unpinnedUsers = filtered.filter(u => !pinnedIds.includes(u.id));
-  const activeChat = INITIAL_DM_USERS.find(u => u.id === selectedUser);
 
-  const renderSection = (users: typeof INITIAL_DM_USERS, title: string) => {
+  const renderSection = (users: User[], title: string) => {
     if (!users.length) return null;
     return (
       <div className="mb-4">
@@ -95,20 +171,18 @@ export const DirectMessages: React.FC<DirectMessagesProps> = ({ currentUser, sho
           {users.map(user => {
             const isPinned = pinnedIds.includes(user.id);
             return (
-              <button key={user.id} onClick={() => setSelectedUser(user.id)}
+              <button key={user.id} onClick={() => setChatWithUser(user)}
                 className={`w-[calc(100%-16px)] mx-2 p-3 flex items-center gap-3 transition-all group rounded-2xl
-                ${selectedUser === user.id ? 'bg-white/[0.08] shadow-sm' : 'hover:bg-white/[0.04]'}`}>
+                ${chatWithUser?.id === user.id ? 'bg-white/[0.08] shadow-sm' : 'hover:bg-white/[0.04]'}`}>
                 <div className="relative shrink-0">
                   <img src={user.avatar} alt={user.name} className="w-12 h-12 rounded-[18px] object-cover ring-1 ring-white/10 shadow-md" />
-                  <div className={`absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full border-2 border-[rgba(20,15,40,0.8)] shadow-lg
-                    ${user.status === 'online' ? 'bg-emerald-400 shadow-emerald-500/50' : user.status === 'idle' ? 'bg-yellow-400' : 'bg-white/30'}`} />
                 </div>
                 <div className="flex-1 text-left overflow-hidden">
                   <div className="font-semibold text-white/90 truncate text-sm flex items-center gap-1.5">
                     {user.name}
                     {mutedIds.has(user.id) && <BellOff size={12} className="text-white/30" />}
                   </div>
-                  <div className="text-[13px] text-white/40 truncate mt-0.5">{user.lastMsg}</div>
+                  <div className="text-[13px] text-white/40 truncate mt-0.5">{user.bio}</div>
                 </div>
                 <div onClick={e => togglePin(e, user.id)}
                   className={`p-1.5 rounded-xl transition-colors ${isPinned ? 'text-indigo-400' : 'text-white/10 opacity-0 group-hover:opacity-100 hover:text-white/60 hover:bg-white/10'}`}>
@@ -129,7 +203,7 @@ export const DirectMessages: React.FC<DirectMessagesProps> = ({ currentUser, sho
         style={{ border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.03)' }}>
         
         {/* Sidebar */}
-        <div className={`${selectedUser ? 'hidden md:flex' : 'flex'} w-full md:w-[320px] flex-col shrink-0 relative`}
+        <div className={`${chatWithUser ? 'hidden md:flex' : 'flex'} w-full md:w-[320px] flex-col shrink-0 relative`}
           style={{ borderRight: '1px solid rgba(255,255,255,0.08)', background: 'linear-gradient(to bottom, rgba(255,255,255,0.02), transparent)' }}>
           <div className="p-6 pb-4">
             <h2 className="font-bold text-white text-2xl mb-4 gradient-text">消息</h2>
@@ -148,18 +222,17 @@ export const DirectMessages: React.FC<DirectMessagesProps> = ({ currentUser, sho
         </div>
 
         {/* Chat Area */}
-        {selectedUser && activeChat ? (
+        {chatWithUser ? (
           <div className="flex-1 flex flex-col relative bg-gradient-to-br from-transparent to-black/10">
             {/* Header */}
             <div className="h-[76px] border-b border-white/5 flex items-center justify-between px-6 shrink-0 z-10" style={{ background: 'rgba(255,255,255,0.02)' }}>
               <div className="flex items-center gap-4">
-                <button className="md:hidden w-10 h-10 flex items-center justify-center text-white/50 hover:text-white bg-white/5 hover:bg-white/10 rounded-full transition-all" onClick={() => setSelectedUser(null)}>←</button>
-                <img src={activeChat.avatar} className="w-10 h-10 rounded-[14px] ring-1 ring-white/20 object-cover shadow-sm" alt="" />
+                <button className="md:hidden w-10 h-10 flex items-center justify-center text-white/50 hover:text-white bg-white/5 hover:bg-white/10 rounded-full transition-all" onClick={() => setChatWithUser(null)}>←</button>
+                <img src={chatWithUser.avatar} className="w-10 h-10 rounded-[14px] ring-1 ring-white/20 object-cover shadow-sm" alt="" />
                 <div>
-                  <div className="font-bold text-white/90 text-[15px]">{activeChat.name}</div>
+                  <div className="font-bold text-white/90 text-[15px]">{chatWithUser.name}</div>
                   <div className="text-[12px] text-white/40 flex items-center gap-1.5 mt-0.5">
-                    <span className={`w-1.5 h-1.5 rounded-full ${activeChat.status === 'online' ? 'bg-emerald-400' : activeChat.status === 'idle' ? 'bg-yellow-400' : 'bg-white/30'}`} />
-                    {activeChat.status === 'online' ? '在线' : activeChat.status === 'idle' ? '离开' : '离线'}
+                    {chatWithUser.bio}
                   </div>
                 </div>
               </div>
@@ -172,17 +245,17 @@ export const DirectMessages: React.FC<DirectMessagesProps> = ({ currentUser, sho
                     <div className="fixed inset-0 z-40" onClick={() => setShowMoreMenu(false)} />
                     <div className="absolute top-[52px] right-0 w-56 glass-strong rounded-2xl z-50 overflow-hidden animate-fade-in shadow-2xl" style={{ border: '1px solid rgba(255,255,255,0.15)' }}>
                       <div className="p-1">
-                        <button onClick={() => { setMutedIds(p => { const s = new Set(p); s.has(selectedUser) ? s.delete(selectedUser) : s.add(selectedUser); return s; }); showToast?.(mutedIds.has(selectedUser) ? '已取消静音' : '已静音'); setShowMoreMenu(false); }}
+                        <button onClick={() => { setMutedIds(p => { const s = new Set(p); s.has(chatWithUser.id) ? s.delete(chatWithUser.id) : s.add(chatWithUser.id); return s; }); showToast?.(mutedIds.has(chatWithUser.id) ? '已取消静音' : '已静音'); setShowMoreMenu(false); }}
                           className="w-full flex items-center gap-3 px-4 py-3 text-sm text-white/70 hover:bg-white/10 hover:text-white rounded-xl transition-colors">
-                          {mutedIds.has(selectedUser) ? <Bell size={16} /> : <BellOff size={16} />}
-                          {mutedIds.has(selectedUser) ? '取消静音' : '静音对话'}
+                          {mutedIds.has(chatWithUser.id) ? <Bell size={16} /> : <BellOff size={16} />}
+                          {mutedIds.has(chatWithUser.id) ? '取消静音' : '静音对话'}
                         </button>
                         <button onClick={() => { showToast?.('已提交举报'); setShowMoreMenu(false); }}
                           className="w-full flex items-center gap-3 px-4 py-3 text-sm text-orange-400/80 hover:bg-orange-500/10 hover:text-orange-300 rounded-xl transition-colors">
                           <Flag size={16} /> 举报
                         </button>
                         <div className="h-px bg-white/10 my-1 mx-2" />
-                        <button onClick={() => { showToast?.('对话已删除'); setShowMoreMenu(false); setSelectedUser(null); }}
+                        <button onClick={() => { showToast?.('对话已删除'); setShowMoreMenu(false); setChatWithUser(null); }}
                           className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-400/80 hover:bg-red-500/10 hover:text-red-300 rounded-xl transition-colors">
                           <Trash2 size={16} /> 删除对话
                         </button>
@@ -245,11 +318,22 @@ export const DirectMessages: React.FC<DirectMessagesProps> = ({ currentUser, sho
             )}
 
             {/* Input */}
-            <div className="p-6 pt-2 shrink-0 z-10">
+            <div className="p-6 pt-2 shrink-0 z-10 relative">
+              {showEmojiPicker && (
+                <div className="absolute bottom-full mb-2 left-6 bg-[rgba(20,15,40,0.95)] backdrop-blur-xl border border-white/10 rounded-2xl p-3 shadow-2xl flex flex-wrap gap-2 w-64 z-50 animate-fade-in">
+                  {EMOJI_LIST.map(e => (
+                    <button key={e} onClick={() => setInputText(prev => prev + e)}
+                      className="w-8 h-8 flex items-center justify-center text-lg hover:bg-white/10 rounded-xl transition-colors">{e}</button>
+                  ))}
+                </div>
+              )}
               <div className="bg-black/20 rounded-[28px] p-2 pr-4 flex items-end gap-3 shadow-inner border border-white/5 transition-all focus-within:bg-black/30 focus-within:border-white/10" style={{ minHeight: '60px' }}>
                 <div className="flex flex-col gap-1 mb-0.5 shrink-0 pl-1">
                   <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageSelect} />
                   <input ref={videoInputRef} type="file" accept="video/*" className="hidden" onChange={handleVideoSelect} />
+                  <button onClick={() => setShowEmojiPicker(!showEmojiPicker)} className={`w-9 h-9 shrink-0 flex items-center justify-center rounded-full transition-all ${showEmojiPicker ? 'text-indigo-400 bg-white/10' : 'text-white/40 hover:text-white hover:bg-white/10'}`}>
+                    😀
+                  </button>
                   <button onClick={() => videoInputRef.current?.click()} title="上传视频" className="w-9 h-9 shrink-0 flex items-center justify-center rounded-full text-white/40 hover:text-white hover:bg-white/10 transition-all">
                     <VideoIcon size={20} />
                   </button>
@@ -260,7 +344,7 @@ export const DirectMessages: React.FC<DirectMessagesProps> = ({ currentUser, sho
                 
                 <textarea value={inputText} onChange={e => setInputText(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-                  placeholder={`发送消息给 ${activeChat.name}…`}
+                  placeholder={`发送消息给 ${chatWithUser.name}…`}
                   className="flex-1 bg-transparent text-white/90 py-3 max-h-40 min-h-[44px] focus:outline-none resize-none placeholder-white/30 text-[15px] leading-relaxed custom-scrollbar" />
                   
                 <button onClick={handleSend} disabled={!inputText.trim() && !selectedImage && !selectedVideo}

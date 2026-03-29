@@ -3,6 +3,8 @@ import { Hash, Volume2, Users, Search, Settings, Send, LogOut, BellOff, Bell, Li
 import { Group, Channel, Message, User } from '../types';
 import { supabase } from '../lib/supabase';
 
+const EMOJI_LIST = ['😀','😂','🥰','😎','🥺','😭','😡','👍','🎉','❤️','✨','🔥','🤔','👀','🙏','💪'];
+
 interface GroupViewProps {
   group: Group;
   currentUser: User;
@@ -22,6 +24,7 @@ export const GroupView: React.FC<GroupViewProps> = ({ group, currentUser, showTo
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [selectedVideo, setSelectedVideo] = useState<string | null>(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showCreateTopic, setShowCreateTopic] = useState(false);
   const [newTopicName, setNewTopicName] = useState('');
   const [showMembers, setShowMembers] = useState(false);
@@ -72,7 +75,7 @@ export const GroupView: React.FC<GroupViewProps> = ({ group, currentUser, showTo
         const { data: profile } = await supabase.from('profiles').select('id, name, avatar_url').eq('id', newMsg.sender_id).single();
         setMessages(prev => {
           if (prev.find(m => m.id === newMsg.id)) return prev;
-          return [...prev, {
+          const newArray = [...prev, {
             id: newMsg.id,
             senderId: profile?.id || newMsg.sender_id,
             senderName: profile?.name || '用户',
@@ -80,6 +83,7 @@ export const GroupView: React.FC<GroupViewProps> = ({ group, currentUser, showTo
             content: newMsg.content,
             timestamp: new Date(newMsg.created_at).toLocaleString()
           }];
+          return newArray.sort((a,b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
         });
       })
       .subscribe();
@@ -122,20 +126,24 @@ export const GroupView: React.FC<GroupViewProps> = ({ group, currentUser, showTo
     if (selectedImage) contents.push(`__IMG__${selectedImage}`);
     if (selectedVideo) contents.push(`__VID__${selectedVideo}`);
     
+    setInputText(''); setSelectedImage(null); setSelectedVideo(null); setShowEmojiPicker(false);
+    
     for (const content of contents) {
       const { data } = await supabase.from('messages').insert({
         channel_id: activeChannel.id, sender_id: currentUser.id, content
       }).select('*, profiles(id, name, handle, avatar_url, bio)').single();
       
       if (data) {
-        setMessages(prev => [...prev, {
-          id: data.id, senderId: data.profiles?.id, senderName: data.profiles?.name,
-          senderAvatar: data.profiles?.avatar_url, content: data.content, timestamp: new Date(data.created_at).toLocaleString()
-        }]);
+        setMessages(prev => {
+          if (prev.find(m => m.id === data.id)) return prev;
+          const newArray = [...prev, {
+            id: data.id, senderId: data.profiles?.id, senderName: data.profiles?.name,
+            senderAvatar: data.profiles?.avatar_url, content: data.content, timestamp: new Date(data.created_at).toLocaleString()
+          }];
+          return newArray.sort((a,b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+        });
       }
     }
-    
-    setInputText(''); setSelectedImage(null); setSelectedVideo(null);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -363,13 +371,24 @@ export const GroupView: React.FC<GroupViewProps> = ({ group, currentUser, showTo
           )}
 
           {/* Input Area */}
-          <div className="p-6 pt-2 shrink-0 z-10">
+          <div className="p-6 pt-2 shrink-0 z-10 relative">
+            {showEmojiPicker && (
+              <div className="absolute bottom-full mb-2 left-6 bg-[rgba(20,15,40,0.95)] backdrop-blur-xl border border-white/10 rounded-2xl p-3 shadow-2xl flex flex-wrap gap-2 w-64 z-50 animate-fade-in">
+                {EMOJI_LIST.map(e => (
+                  <button key={e} onClick={() => setInputText(prev => prev + e)}
+                    className="w-8 h-8 flex items-center justify-center text-lg hover:bg-white/10 rounded-xl transition-colors">{e}</button>
+                ))}
+              </div>
+            )}
             <div className="bg-black/20 rounded-[28px] p-2 pr-4 flex items-end gap-3 shadow-inner border border-white/5 transition-all focus-within:bg-black/30 focus-within:border-white/10"
                  style={{ minHeight: '60px' }}>
               
               <div className="flex flex-col gap-1 mb-0.5 shrink-0 pl-1">
                 <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageSelect} />
                 <input ref={videoInputRef} type="file" accept="video/*" className="hidden" onChange={handleVideoSelect} />
+                <button onClick={() => setShowEmojiPicker(!showEmojiPicker)} className={`w-9 h-9 shrink-0 flex items-center justify-center rounded-full transition-all ${showEmojiPicker ? 'text-indigo-400 bg-white/10' : 'text-white/40 hover:text-white hover:bg-white/10'}`}>
+                  😀
+                </button>
                 
                 <button onClick={() => videoInputRef.current?.click()} title="上传视频" className="w-9 h-9 shrink-0 flex items-center justify-center rounded-full text-white/40 hover:text-white hover:bg-white/10 transition-all">
                   <VideoIcon size={20} />

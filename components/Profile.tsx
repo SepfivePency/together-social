@@ -8,12 +8,13 @@ interface ProfileProps {
   isCurrentUser: boolean;
   showToast?: (msg: string) => void;
   onOpenPost?: (postId: string) => void;
+  onUserClick?: (user: User) => void;
   currentUserId?: string;
 }
 
 // No longer using MOCK_FRIENDS
 
-export const Profile: React.FC<ProfileProps> = ({ user, isCurrentUser, showToast, onOpenPost, currentUserId }) => {
+export const Profile: React.FC<ProfileProps> = ({ user, isCurrentUser, showToast, onOpenPost, onUserClick, currentUserId }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [showFriends, setShowFriends] = useState(false);
@@ -342,7 +343,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, isCurrentUser, showToast
                 friendsList.length === 0 ? (
                   <div className="text-center text-white/30 py-10 text-sm">{isCurrentUser ? '暂无好友，快去搜索添加一个吧！' : '该用户暂无好友'}</div>
                 ) : friendsList.map((f: any) => (
-                  <div key={f.id} className="flex items-center gap-3.5 px-4 py-3 mx-2 my-1 rounded-2xl hover:bg-white/[0.06] transition-all group cursor-pointer" onClick={() => { setShowFriends(false); onOpenPost?.(''); }}>
+                  <div key={f.id} className="flex items-center gap-3.5 px-4 py-3 mx-2 my-1 rounded-2xl hover:bg-white/[0.06] transition-all group cursor-pointer" onClick={() => { setShowFriends(false); onUserClick?.({ id: f.id, name: f.name, avatar: f.avatar_url, handle: f.handle || '', bio: f.bio || '' }); }}>
                     <div className="relative">
                       <img src={f.avatar_url} alt={f.name} className="w-12 h-12 rounded-[16px] object-cover ring-1 ring-white/10 shadow-sm" />
                     </div>
@@ -350,9 +351,6 @@ export const Profile: React.FC<ProfileProps> = ({ user, isCurrentUser, showToast
                       <div className="font-bold text-white/90 text-[15px] truncate">{f.name}</div>
                       <div className="text-[13px] text-white/40 mt-0.5 truncate">{f.bio}</div>
                     </div>
-                    <button onClick={e => { e.stopPropagation(); showToast?.(`私聊功能已启用准备：${f.name}`); }} className="w-10 h-10 rounded-full flex items-center justify-center glass group-hover:bg-indigo-500/20 text-white/30 group-hover:text-indigo-300 transition-all opacity-0 group-hover:opacity-100 shrink-0">
-                      <Mail size={16} />
-                    </button>
                   </div>
                 ))
               )}

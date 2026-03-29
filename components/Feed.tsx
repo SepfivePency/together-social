@@ -148,6 +148,15 @@ export const Feed: React.FC<FeedProps> = ({ currentUser, showToast, groups = [],
     
     if (error) { showToast?.('评论失败'); return; }
 
+    if (post.author.id !== currentUser.id) {
+      await supabase.from('notifications').insert({
+        user_id: post.author.id,
+        actor_id: currentUser.id,
+        type: 'comment',
+        group_id: post.id // Using group_id column to store post ID temporarily for notification
+      });
+    }
+
     const newComment = {
       id: data.id,
       author: { id: data.profiles?.id, name: data.profiles?.name, handle: data.profiles?.handle, avatar: data.profiles?.avatar_url, bio: data.profiles?.bio },
